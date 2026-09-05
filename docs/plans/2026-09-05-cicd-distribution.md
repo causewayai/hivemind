@@ -17,7 +17,7 @@ and pushes a hand-templated Homebrew formula / Scoop manifest to two new
 private sibling repos using a cross-repo PAT.
 
 **Tech Stack:** GitHub Actions, Go 1.25 (cgo), `gh` CLI, plain shell/`sha256sum`
-for checksums, a Homebrew tap repo (`causewayai/homebrew-hivemind`) and a
+for checksums, a Homebrew tap repo (`causewayai/homebrew-causewayai`) and a
 Scoop bucket repo (`causewayai/scoop-hivemind`).
 
 ---
@@ -267,7 +267,7 @@ if they'd rather you do it, listing the exact contexts first.
 running these commands.**
 
 ```bash
-gh repo create causewayai/homebrew-hivemind --private \
+gh repo create causewayai/homebrew-causewayai --private \
   --description "Homebrew tap for hivemindd" 
 gh repo create causewayai/scoop-hivemind --private \
   --description "Scoop bucket for hivemindd"
@@ -320,7 +320,7 @@ class Hivemindd < Formula
 end
 ```
 
-Commit and push this placeholder to `main` on `homebrew-hivemind`.
+Commit and push this placeholder to `main` on `homebrew-causewayai`.
 
 **Step 2: Seed the bucket repo with a placeholder manifest**
 
@@ -350,7 +350,7 @@ Commit and push this placeholder to `main` on `scoop-hivemind`.
 **Step 3: Confirm both repos exist and have the placeholder file**
 
 ```bash
-gh api repos/causewayai/homebrew-hivemind/contents/Formula/hivemindd.rb --jq .name
+gh api repos/causewayai/homebrew-causewayai/contents/Formula/hivemindd.rb --jq .name
 gh api repos/causewayai/scoop-hivemind/contents/bucket/hivemindd.json --jq .name
 ```
 Expected: each prints the filename, confirming the push landed.
@@ -368,7 +368,7 @@ user's behalf.**
 Tell the user: go to
 https://github.com/settings/personal-access-tokens/new, create a
 fine-grained token scoped to the `causewayai` org, restricted to the two
-repos `homebrew-hivemind` and `scoop-hivemind`, with **Contents:
+repos `homebrew-causewayai` and `scoop-hivemind`, with **Contents:
 Read and write** permission. Suggest no expiration shorter than the
 project's realistic release cadence (e.g. 1 year), since a silently
 expired token turns into a broken release pipeline.
@@ -531,7 +531,7 @@ git commit -m "ci: add per-OS release build/archive jobs"
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/homebrew-hivemind.git" tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/homebrew-causewayai.git" tap
           cat > tap/Formula/hivemindd.rb <<EOF
           class Hivemindd < Formula
             desc "Local persistent memory daemon for AI harnesses (MCP over HTTP)"
@@ -612,7 +612,7 @@ git commit -m "ci: add per-OS release build/archive jobs"
 ```
 
 Note the reused secret name: `HOMEBREW_TAP_TOKEN` grants write access to
-*both* `homebrew-hivemind` and `scoop-hivemind` (Task 4 scoped the PAT to
+*both* `homebrew-causewayai` and `scoop-hivemind` (Task 4 scoped the PAT to
 both repos), so the Scoop step reuses it rather than needing a second
 secret.
 
@@ -670,7 +670,7 @@ present.
 **Step 4: Verify the Homebrew formula updated**
 
 ```bash
-gh api repos/causewayai/homebrew-hivemind/contents/Formula/hivemindd.rb --jq '.content' | base64 -d | grep version
+gh api repos/causewayai/homebrew-causewayai/contents/Formula/hivemindd.rb --jq '.content' | base64 -d | grep version
 ```
 Expected: `version "0.0.1-test"`
 
@@ -684,7 +684,7 @@ Expected: `"0.0.1-test"`
 **Step 6: Do a real local install test on this machine (macOS)**
 
 ```bash
-brew tap causewayai/hivemind
+brew tap causewayai/causewayai
 brew install hivemindd
 hivemindd --version
 brew services start hivemindd
@@ -745,7 +745,7 @@ Add that line to your shell profile so it persists across sessions.
 ### macOS / Linux (Homebrew)
 
 ```bash
-brew tap causewayai/hivemind
+brew tap causewayai/causewayai
 brew install hivemindd
 brew services start hivemindd   # runs hivemindd in the background at login
 ```
