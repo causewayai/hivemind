@@ -17,6 +17,8 @@ type MemoryQueryInput struct {
 	TopK      int      `json:"top_k,omitempty"`
 }
 
+// MemoryQueryOutput is the memory_query tool's output: matching entries,
+// ranked by relevance.
 type MemoryQueryOutput struct {
 	Results []*store.MemoryEntry `json:"results"`
 }
@@ -26,7 +28,7 @@ func (s *Server) handleMemoryQuery(ctx context.Context, in MemoryQueryInput) (*M
 		in.TopK = 10
 	}
 
-	embVec, err := s.embedder.Embed(in.Query)
+	embVec, err := s.embedder.Embed(ctx, in.Query)
 	if err != nil {
 		return nil, err
 	}
@@ -47,9 +49,9 @@ func (s *Server) handleMemoryQuery(ctx context.Context, in MemoryQueryInput) (*M
 		return nil, err
 	}
 
-	results := append(own, shared...)
-	if len(results) > in.TopK {
-		results = results[:in.TopK]
+	own = append(own, shared...)
+	if len(own) > in.TopK {
+		own = own[:in.TopK]
 	}
-	return &MemoryQueryOutput{Results: results}, nil
+	return &MemoryQueryOutput{Results: own}, nil
 }

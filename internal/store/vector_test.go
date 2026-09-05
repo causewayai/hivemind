@@ -8,7 +8,7 @@ func TestVectorTable_InsertAndSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	near := make([]float32, 4)
 	far := make([]float32, 4)

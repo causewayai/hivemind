@@ -8,10 +8,7 @@ import (
 
 func TestListScopes(t *testing.T) {
 	srv := New(nil, nil)
-	out, err := srv.handleListScopes(context.Background(), ListScopesInput{})
-	if err != nil {
-		t.Fatalf("handleListScopes() error = %v", err)
-	}
+	out := srv.handleListScopes(context.Background(), ListScopesInput{})
 	want := []string{"session", "user"}
 	if !reflect.DeepEqual(out.Scopes, want) {
 		t.Errorf("Scopes = %v, want %v", out.Scopes, want)

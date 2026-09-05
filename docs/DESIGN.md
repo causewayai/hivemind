@@ -44,4 +44,22 @@ type ToolHandlerFor[In, Out any] func(_ context.Context, request *CallToolReques
 
 — three parameters (ctx, request, input) and three return values (result, output, error), not two and two. Returning `(nil, out, nil)` is sufficient; the SDK auto-marshals a non-nil `out` into `CallToolResult.StructuredContent` when `result` is nil (see `toolForErr` in `mcp/server.go`).
 
-**Resolution:** kept the existing unit-tested `handle*` methods (`handleMemoryWrite`, `handleMemoryQuery`, `handleListScopes` in `internal/mcpserver`) with their original simple `(ctx, In) -> (*Out, error)` shape — their tests didn't need to change. Added a thin adapter layer, `internal/mcpserver/adapters.go` (`HandleMemoryWrite`, `HandleMemoryQuery`, `HandleListScopes`), matching `ToolHandlerFor` exactly, used only when wiring `mcp.AddTool` in `cmd/hivemindd/main.go`.
+**Resolution:** kept the existing unit-tested `handle*` methods (`handleMemoryWrite`, `handleMemoryQuery`, `handleListScopes` in `internal/mcpserver`) with their original simple `(ctx, In) -> (*Out, error)` shape — their tests didn't need to change. Added a thin adapter layer, `internal/mcpserver/adapters.go` (`HandleMemoryWrite`, `HandleMemoryQuery`, `HandleListScopes`), matching `ToolHandlerFor` exactly, used only when wiring `mcp.AddTool` in `cmd/hivemindd/main.go`. (`handleListScopes` later dropped its `error` return during lint cleanup — see below — since `unparam` correctly noted it could never fail; the adapter now supplies `nil` for the error itself.)
+
+---
+
+## Linting, architecture checks, and naming consistency (golangci-lint)
+
+Set up before the first push, per explicit request. Config lives at `.golangci.yml` (v2 schema); run via `make lint` or `make check` (lint + test). Requires `golangci-lint` v2 (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`).
+
+**Linters enabled beyond the v2 `standard` set** (`errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`): `revive` (naming/style, incl. exported-symbol doc comments), `gocritic` (bug-pattern diagnostics), `misspell`, `unconvert`, `errname`, `unparam` (catches parameters/returns that are always the same value — this is what caught `handleListScopes`'s dead `error` return), `copyloopvar`, `sqlclosecheck` and `rowserrcheck` (both `database/sql`-specific, relevant since `internal/store` is all raw SQL), plus `gofmt`/`goimports` as formatters.
+
+A first run against the Task 1–13 implementation surfaced 42 real issues, all fixed rather than suppressed: unchecked `Close`/`Rollback` errors (wrapped in `defer func() { _ = x.Close() }()`), a `log.Fatal` after an active `defer` that would never run (`main` restructured into `main`/`run() error`), an `append` result assigned to the wrong variable, missing package and exported-symbol doc comments throughout, and dead `ctx` parameters — the last of which led to threading `context.Context` through `embedding.Provider.Embed` (a real design improvement: a future HTTP-backed provider will need it for cancellation) rather than just underscoring the parameter.
+
+**Architecture enforcement via `depguard`:** rules encode this project's layering — `internal/config`, `internal/embedding`, and `internal/store` are foundational and may not import any other package in this module; `internal/mcpserver` may depend on those but not on `cmd/hivemindd` (the composition root). Verified empirically by temporarily injecting a real violation for each of the four rules and confirming `golangci-lint` actually flags it (not just "no rules matched anything") — see git history for `.golangci.yml` around the date of this note if the verification steps are needed again.
+
+**Non-obvious gotcha, worth preserving:** this depguard version's `files` glob matching requires **both** a leading `**/` and a trailing `**` — i.e. exactly `"**/internal/config/**"`. Any of the "obvious" alternatives silently match nothing (no error, just 0 issues, indistinguishable from "no violations"):
+- `"internal/config/**/*.go"` — a bare `dir/**/*.go` requires at least one intervening subdirectory in this doublestar implementation, so it never matches files directly in `dir`.
+- `"internal/config/**"` (no leading `**/`) — also silently matches nothing; the leading `**/` is required to skip whatever base path prefix the matcher compares against.
+
+Because a wrong glob fails *silently* (the linter reports 0 issues either way), any new `depguard` rule added later should be verified the same way this one was: inject a real cross-layer import, confirm it's flagged, then revert.

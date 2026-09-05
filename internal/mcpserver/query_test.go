@@ -14,7 +14,7 @@ func TestMemoryQuery_SessionIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	provider := embedding.NewHashProvider(8)
 	srv := New(s, provider)
@@ -28,7 +28,7 @@ func TestMemoryQuery_SessionIsolation(t *testing.T) {
 	// matching the query's so semantic distance never gates inclusion here;
 	// Task 8 (internal/store/memory_test.go) covers semantic relevance
 	// filtering with vectors designed for that purpose.
-	queryVec, err := provider.Embed("secret")
+	queryVec, err := provider.Embed(ctx, "secret")
 	if err != nil {
 		t.Fatalf("Embed() error = %v", err)
 	}

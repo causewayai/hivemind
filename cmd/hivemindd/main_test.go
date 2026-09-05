@@ -17,7 +17,7 @@ func TestDaemon_WriteThenQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	mcpSrv := buildMCPServer(s, embedding.NewHashProvider(768))
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return mcpSrv }, &mcp.StreamableHTTPOptions{Stateless: true})
@@ -30,7 +30,7 @@ func TestDaemon_WriteThenQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client.Connect() error = %v", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	writeRes, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "memory_write",
