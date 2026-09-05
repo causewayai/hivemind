@@ -397,17 +397,27 @@ Tell the user: go to
   to the tap/bucket repos; the workflow's default `GITHUB_TOKEN` already
   has write access to `hivemind` for creating the release).
 
-**Step 2: Store the App ID and private key as secrets on the main repo**
+**Step 2: Give the user a script to set the secrets themselves — never
+ask them to paste the App ID or key contents into chat**
 
-Ask the user for the App ID (not sensitive, but store it as a secret
-alongside the key for simplicity) and the contents of the downloaded
-`.pem` file (sensitive — have them paste it directly into the `gh secret
-set` prompt, or pipe the file in, rather than pasting into chat):
+Even though only the private key is truly sensitive, route both through
+a script the user runs in their own terminal, so neither value ever
+enters the conversation:
 
 ```bash
-gh secret set RELEASE_APP_ID --repo causewayai/hivemind
-gh secret set RELEASE_APP_PRIVATE_KEY --repo causewayai/hivemind < path/to/downloaded-key.pem
+read -rp "App ID: " APP_ID
+echo -n "$APP_ID" | gh secret set RELEASE_APP_ID --repo causewayai/hivemind
+
+read -rp "Path to downloaded .pem file: " PEM_PATH
+gh secret set RELEASE_APP_PRIVATE_KEY --repo causewayai/hivemind < "$PEM_PATH"
+
+gh secret list --repo causewayai/hivemind
 ```
+
+Have them run it (in their own terminal, or via `!` in a Claude Code
+session) and confirm back once both secrets show up — don't run this on
+their behalf with values they've handed you, and don't ask them to paste
+the App ID or key into chat "just to relay it into a command."
 
 **Step 3: Verify both secrets are set (not their values)**
 
