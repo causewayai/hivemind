@@ -1,6 +1,8 @@
 package store
 
-const schema = `
+import "fmt"
+
+const structuredSchema = `
 CREATE TABLE IF NOT EXISTS memory_entries (
     id           TEXT PRIMARY KEY,
     content      TEXT NOT NULL,
@@ -24,3 +26,10 @@ CREATE TABLE IF NOT EXISTS memory_tags (
 
 CREATE INDEX IF NOT EXISTS idx_memory_tags_tag ON memory_tags(tag);
 `
+
+func vectorSchema(dim int) string {
+	return fmt.Sprintf(
+		`CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(embedding float[%d]);`,
+		dim,
+	)
+}
