@@ -87,14 +87,14 @@ now — add later on demand.
   each archive's sha256 from `checksums.txt`, renders the Homebrew formula
   and Scoop manifest from a template (simple string substitution — no
   templating library needed), and pushes the result as a commit to
-  `causewayai/homebrew-hivemind` / `causewayai/scoop-hivemind` using a
+  `causewayai/homebrew-causewayai` / `causewayai/scoop-hivemind` using a
   cross-repo PAT.
 
 ---
 
 ## Homebrew tap (macOS + Linux)
 
-- **Repo:** `causewayai/homebrew-hivemind` (the `homebrew-` prefix is
+- **Repo:** `causewayai/homebrew-causewayai` (the `homebrew-` prefix is
   required by Homebrew's tap-discovery convention), private.
 - **Formula:** `Formula/hivemindd.rb`, regenerated and pushed by GoReleaser
   on every release.
@@ -105,7 +105,7 @@ now — add later on demand.
   platforms — no manual foregrounding or hand-rolled launchd plist needed.
 - **Install flow:**
   ```
-  brew tap causewayai/hivemind
+  brew tap causewayai/causewayai
   brew install hivemindd
   brew services start hivemindd
   ```
@@ -130,7 +130,7 @@ now — add later on demand.
   one-time setup step in the README; it's the deliberate friction traded
   for keeping the source private.
 - **CI:** the release workflow needs a token with write access to both
-  `homebrew-hivemind` and `scoop-hivemind` — the default per-run
+  `homebrew-causewayai` and `scoop-hivemind` — the default per-run
   `GITHUB_TOKEN` can't push to other repos — stored as a repo secret
   (`HOMEBREW_TAP_TOKEN`) in `causewayai/hivemind`.
 
