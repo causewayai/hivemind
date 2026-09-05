@@ -4,7 +4,7 @@ import "testing"
 
 func TestOpen_CreatesSchema(t *testing.T) {
 	dir := t.TempDir()
-	s, err := Open(dir + "/test.db")
+	s, err := Open(dir+"/test.db", 768)
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
