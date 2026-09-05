@@ -16,9 +16,6 @@
 # on every platform.
 export CGO_CFLAGS := -I$(subst \,/,$(shell go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3))
 
-debug-cgo:
-	@echo "CGO_CFLAGS=[$$CGO_CFLAGS]"
-
 build:
 	CGO_ENABLED=1 go build -o hivemindd ./cmd/hivemindd
 
