@@ -86,3 +86,33 @@ func (s *Store) searchVectors(query []float32, topK int) ([]int64, error) {
 	}
 	return ids, rows.Err()
 }
+
+type vecMatch struct {
+	RowID    int64
+	Distance float64
+}
+
+func (s *Store) searchVectorsWithDistance(query []float32, topK int) ([]vecMatch, error) {
+	blob, err := sqlite_vec.SerializeFloat32(query)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Query(
+		`SELECT rowid, distance FROM memory_vectors WHERE embedding MATCH ? ORDER BY distance LIMIT ?`,
+		blob, topK,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var matches []vecMatch
+	for rows.Next() {
+		var m vecMatch
+		if err := rows.Scan(&m.RowID, &m.Distance); err != nil {
+			return nil, err
+		}
+		matches = append(matches, m)
+	}
+	return matches, rows.Err()
+}
