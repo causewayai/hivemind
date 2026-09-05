@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            goos: darwin
+            goarch: arm64
+            archive: tar.gz
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            archive: tar.gz
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            archive: tar.gz
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Configure MinGW GCC (Windows only)
+        if: runner.os == 'Windows'
+        run: echo "C:\Strawberry\c\bin" >> $env:GITHUB_PATH
+
+      - name: Pre-fetch modules (so CGO_CFLAGS path resolution has something to resolve)
+        run: go mod download
+        shell: bash
+
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: 1
+        run: |
+          # Same fix as ci.yml/Makefile (see docs/DESIGN.md, "Windows CI
+          # cgo toolchain"): sqlite-vec-go-bindings needs sqlite3ext.h,
+          # which only mattn/go-sqlite3 vendors. This workflow calls `go
+          # build` directly rather than through `make build`, so it needs
+          # the same CGO_CFLAGS fix applied inline rather than inheriting
+          # it from the Makefile.
+          export CGO_CFLAGS="-I$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3 | tr '\\' '/')"
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          EXT=""
+          [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
+          go build -ldflags "-X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE" \
+            -o "hivemindd${EXT}" ./cmd/hivemindd
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: tar -czf "hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" hivemindd
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          zip "hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.zip" hivemindd.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          if-no-files-found: error
