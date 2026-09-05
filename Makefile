@@ -8,7 +8,13 @@
 # build fails with "sqlite3ext.h: No such file or directory". Point CGO at
 # go-sqlite3's module directory explicitly so the build is portable rather
 # than relying on that platform-specific coincidence.
-export CGO_CFLAGS := -I$(shell go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3)
+# $(subst) normalizes to forward slashes: on Windows, `go list` returns a
+# backslash-separated path, and an unquoted backslash gets eaten as a shell
+# escape character when this expands into a recipe's command line (the
+# include path silently collapses, reproducing the same "not found" error).
+# Forward slashes are accepted by MinGW GCC on Windows too, so this is safe
+# on every platform.
+export CGO_CFLAGS := -I$(subst \,/,$(shell go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3))
 
 build:
 	CGO_ENABLED=1 go build -o hivemindd ./cmd/hivemindd
