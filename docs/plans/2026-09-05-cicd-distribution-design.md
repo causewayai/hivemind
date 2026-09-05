@@ -87,8 +87,9 @@ now — add later on demand.
   each archive's sha256 from `checksums.txt`, renders the Homebrew formula
   and Scoop manifest from a template (simple string substitution — no
   templating library needed), and pushes the result as a commit to
-  `causewayai/homebrew-causewayai` / `causewayai/scoop-causewayai` using a
-  cross-repo PAT.
+  `causewayai/homebrew-causewayai` / `causewayai/scoop-causewayai`,
+  authenticating via a short-lived GitHub App installation token minted
+  in-workflow (see Access, below) rather than a static PAT.
 
 ---
 
@@ -96,8 +97,8 @@ now — add later on demand.
 
 - **Repo:** `causewayai/homebrew-causewayai` (the `homebrew-` prefix is
   required by Homebrew's tap-discovery convention), private.
-- **Formula:** `Formula/hivemindd.rb`, regenerated and pushed by GoReleaser
-  on every release.
+- **Formula:** `Formula/hivemindd.rb`, regenerated and pushed by the
+  release workflow's publish job on every release.
 - **Service management:** the formula declares a `service do ... end`
   block (launchd `RunAtLoad`/`KeepAlive` on macOS; Homebrew-on-Linux maps
   the same block onto its systemd-backed service runner), so
@@ -112,8 +113,8 @@ now — add later on demand.
 
 ## Scoop bucket (Windows)
 
-- **Repo:** `causewayai/scoop-causewayai`, private. GoReleaser pushes an
-  updated manifest JSON on every release.
+- **Repo:** `causewayai/scoop-causewayai`, private. The release workflow's
+  publish job pushes an updated manifest JSON on every release.
 - **Install flow:** `scoop bucket add hivemind ... && scoop install hivemindd`.
 - **Service management:** out of scope. Scoop has no `brew services`
   equivalent; Windows users run the installed binary directly or wire up
@@ -129,10 +130,15 @@ now — add later on demand.
   tap/bucket repo and the private release assets. Document this as a
   one-time setup step in the README; it's the deliberate friction traded
   for keeping the source private.
-- **CI:** the release workflow needs a token with write access to both
+- **CI:** the release workflow needs write access to both
   `homebrew-causewayai` and `scoop-causewayai` — the default per-run
-  `GITHUB_TOKEN` can't push to other repos — stored as a repo secret
-  (`HOMEBREW_TAP_TOKEN`) in `causewayai/hivemind`.
+  `GITHUB_TOKEN` can't push to other repos. Rather than a static PAT
+  secret, a dedicated GitHub App (`causeway-release-bot`) is installed on
+  just those two repos with Contents: Read and write; the workflow mints
+  a short-lived (~1hr) installation access token in-job via
+  `actions/create-github-app-token`, using two repo secrets in
+  `causewayai/hivemind` (`RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`)
+  that hold the App's identity, not a bearer credential by themselves.
 
 ---
 

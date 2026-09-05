@@ -14,7 +14,8 @@ CI and release both run as GitHub Actions matrices of native
 The release workflow adds a final Linux job that collects all 4 platform
 archives, cuts the GitHub Release with `gh release create --generate-notes`,
 and pushes a hand-templated Homebrew formula / Scoop manifest to two new
-private sibling repos using a cross-repo PAT.
+private sibling repos, authenticating as a GitHub App installation
+(short-lived, scoped to just those two repos) rather than a static PAT.
 
 **Tech Stack:** GitHub Actions, Go 1.25 (cgo), `gh` CLI, plain shell/`sha256sum`
 for checksums, a Homebrew tap repo (`causewayai/homebrew-causewayai`) and a
@@ -32,7 +33,7 @@ the user rather than silently deviating.
 
 Several tasks below create real GitHub resources (two new repos, a
 repo secret, a pushed release tag) or ask the user to create a credential
-(a PAT). These are called out explicitly — **stop and confirm with the
+(a GitHub App). These are called out explicitly — **stop and confirm with the
 user before taking that specific action**, per this project's standing
 rule about hard-to-reverse or shared-state changes. Everything else
 (editing files, opening a PR, pushing a branch) is normal, low-risk
@@ -359,37 +360,61 @@ Expected: each prints the filename, confirming the push landed.
 
 ---
 
-### Task 4: Set up the cross-repo PAT
+### Task 4: Set up a GitHub App for cross-repo release automation
 
-**This asks the user to create a credential — do not attempt to automate
-PAT creation; GitHub doesn't expose an API for minting new PATs on a
-user's behalf.**
+**Revised from an earlier static-PAT design.** A GitHub App's
+installation access tokens are minted fresh per workflow run and expire
+after 1 hour, versus a PAT sitting as a long-lived secret in repo
+settings indefinitely — meaningfully less blast radius for a credential
+that only automation ever uses. (The separate end-user PAT documented
+under "Access" in the design doc, for a human's own `brew`/`scoop
+install`, stays a PAT — a 1-hour token isn't practical for a person's
+shell profile, and that's a different threat model: an individually
+owned, revocable credential vs. a shared bot secret.)
 
-**Step 1: Ask the user to create a fine-grained PAT**
+**This requires manual setup in the GitHub UI — there's no `gh` CLI or
+API path to create a GitHub App. Ask the user to do this and report back
+the App ID and private key; do not attempt to automate it.**
+
+**Step 1: Ask the user to create an org-owned GitHub App**
 
 Tell the user: go to
-https://github.com/settings/personal-access-tokens/new, create a
-fine-grained token scoped to the `causewayai` org, restricted to the two
-repos `homebrew-causewayai` and `scoop-causewayai`, with **Contents:
-Read and write** permission. Suggest no expiration shorter than the
-project's realistic release cadence (e.g. 1 year), since a silently
-expired token turns into a broken release pipeline.
+`https://github.com/organizations/causewayai/settings/apps/new` and:
+- Name it something like `causeway-release-bot`.
+- Homepage URL: `https://github.com/causewayai/hivemind` (not
+  functionally important, just required).
+- Under **Webhook**, uncheck "Active" — this app doesn't need one.
+- Under **Repository permissions**, set **Contents: Read and write**
+  (this is the only permission needed).
+- Under "Where can this GitHub App be installed?", choose **Only on this
+  account**.
+- Click **Create GitHub App**, then on the app's settings page, click
+  **Generate a private key** — this downloads a `.pem` file. Note the
+  **App ID** shown near the top of the same page.
+- Go to the app's **Install App** tab, install it on the `causewayai`
+  org, choosing **Only select repositories**: `homebrew-causewayai` and
+  `scoop-causewayai` (not `hivemind` itself — the App only needs to push
+  to the tap/bucket repos; the workflow's default `GITHUB_TOKEN` already
+  has write access to `hivemind` for creating the release).
 
-**Step 2: Add it as a secret on the main repo**
+**Step 2: Store the App ID and private key as secrets on the main repo**
 
-Once the user gives you the token value (or pastes it directly into a
-`gh secret set` prompt so it never appears in chat/history):
+Ask the user for the App ID (not sensitive, but store it as a secret
+alongside the key for simplicity) and the contents of the downloaded
+`.pem` file (sensitive — have them paste it directly into the `gh secret
+set` prompt, or pipe the file in, rather than pasting into chat):
 
 ```bash
-gh secret set HOMEBREW_TAP_TOKEN --repo causewayai/hivemind
-```//paste the token at the prompt
+gh secret set RELEASE_APP_ID --repo causewayai/hivemind
+gh secret set RELEASE_APP_PRIVATE_KEY --repo causewayai/hivemind < path/to/downloaded-key.pem
+```
 
-**Step 3: Verify the secret is set (not its value)**
+**Step 3: Verify both secrets are set (not their values)**
 
 ```bash
 gh secret list --repo causewayai/hivemind
 ```
-Expected: `HOMEBREW_TAP_TOKEN` appears in the list.
+Expected: both `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` appear.
 
 ---
 
@@ -503,6 +528,15 @@ git commit -m "ci: add per-OS release build/archive jobs"
     steps:
       - uses: actions/checkout@v4
 
+      - name: Mint a scoped tap/bucket access token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: causewayai
+          repositories: homebrew-causewayai,scoop-causewayai
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -530,7 +564,7 @@ git commit -m "ci: add per-OS release build/archive jobs"
 
       - name: Update Homebrew tap
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/homebrew-causewayai.git" tap
@@ -577,7 +611,7 @@ git commit -m "ci: add per-OS release build/archive jobs"
           end
           EOF
           cd tap
-          git config user.name "hivemind-release-bot"
+          git config user.name "causeway-release-bot"
           git config user.email "actions@github.com"
           git add Formula/hivemindd.rb
           git commit -m "hivemindd ${VERSION}"
@@ -585,7 +619,7 @@ git commit -m "ci: add per-OS release build/archive jobs"
 
       - name: Update Scoop bucket
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/scoop-causewayai.git" bucket
@@ -608,17 +642,20 @@ git commit -m "ci: add per-OS release build/archive jobs"
           }
           EOF
           cd bucket
-          git config user.name "hivemind-release-bot"
+          git config user.name "causeway-release-bot"
           git config user.email "actions@github.com"
           git add bucket/hivemindd.json
           git commit -m "hivemindd ${VERSION}"
           git push
 ```
 
-Note the reused secret name: `HOMEBREW_TAP_TOKEN` grants write access to
-*both* `homebrew-causewayai` and `scoop-causewayai` (Task 4 scoped the PAT to
-both repos), so the Scoop step reuses it rather than needing a second
-secret.
+Note the single minted token: `steps.app-token.outputs.token` is scoped
+by the earlier `create-github-app-token` step to *both*
+`homebrew-causewayai` and `scoop-causewayai` (Task 4's App installation
+covers both repos), so the Scoop step reuses the same short-lived token
+rather than minting a second one. The token is only valid for the
+lifetime of this job (~1 hour) and is scoped to exactly these two repos —
+it has no access to `hivemind` itself or anything else in the org.
 
 **Step 2: Commit**
 
