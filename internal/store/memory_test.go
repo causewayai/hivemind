@@ -8,7 +8,7 @@ func TestCreateMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	embedding := make([]float32, 8)
 
@@ -49,7 +49,7 @@ func TestListMemories_FilterByScopeAndTag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	mustCreate := func(scope, sessionID string, tags []string) {
 		if _, err := s.CreateMemory(CreateMemoryInput{
@@ -79,7 +79,7 @@ func TestQuery_HybridSemanticAndTagFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	near := []float32{0.1, 0.1, 0.1, 0.1}
 	far := []float32{9.9, 9.9, 9.9, 9.9}

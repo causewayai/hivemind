@@ -18,6 +18,7 @@ type MemoryWriteInput struct {
 	Embedding []float32 `json:"embedding,omitempty" jsonschema:"optional precomputed embedding; if omitted the daemon generates one"`
 }
 
+// MemoryWriteOutput is the memory_write tool's output: the new entry's ID.
 type MemoryWriteOutput struct {
 	ID string `json:"id"`
 }
@@ -26,7 +27,7 @@ func (s *Server) handleMemoryWrite(ctx context.Context, in MemoryWriteInput) (*M
 	embVec := in.Embedding
 	if embVec == nil {
 		var err error
-		embVec, err = s.embedder.Embed(in.Content)
+		embVec, err = s.embedder.Embed(ctx, in.Content)
 		if err != nil {
 			return nil, err
 		}

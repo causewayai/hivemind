@@ -14,7 +14,7 @@ func TestMemoryWrite_DefaultsToSessionScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	srv := New(s, embedding.NewHashProvider(8))
 

@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
+// MemoryEntry is a single stored memory, along with its tags.
 type MemoryEntry struct {
 	ID         string
 	Content    string
@@ -19,6 +20,7 @@ type MemoryEntry struct {
 	UpdatedAt  time.Time
 }
 
+// CreateMemoryInput are the fields needed to persist a new MemoryEntry.
 type CreateMemoryInput struct {
 	Content    string
 	Scope      string // "session" or "user"
@@ -29,6 +31,8 @@ type CreateMemoryInput struct {
 	Embedding  []float32
 }
 
+// CreateMemory inserts a new memory entry, its tags, and (if provided) its
+// embedding, all within one transaction.
 func (s *Store) CreateMemory(in CreateMemoryInput) (*MemoryEntry, error) {
 	now := time.Now().UTC()
 	entry := &MemoryEntry{
@@ -47,7 +51,8 @@ func (s *Store) CreateMemory(in CreateMemoryInput) (*MemoryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	// A no-op after a successful Commit (returns sql.ErrTxDone, safe to ignore).
+	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.Exec(
 		`INSERT INTO memory_entries (id, content, scope, session_id, source, source_type, external_id, created_at, updated_at)
@@ -81,6 +86,7 @@ func (s *Store) CreateMemory(in CreateMemoryInput) (*MemoryEntry, error) {
 	return entry, nil
 }
 
+// GetMemory fetches a single memory entry, including its tags, by ID.
 func (s *Store) GetMemory(id string) (*MemoryEntry, error) {
 	row := s.db.QueryRow(
 		`SELECT id, content, scope, IFNULL(session_id,''), source, source_type, IFNULL(external_id,''), created_at, updated_at
@@ -100,7 +106,7 @@ func (s *Store) GetMemory(id string) (*MemoryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var tag string
 		if err := rows.Scan(&tag); err != nil {
@@ -111,6 +117,8 @@ func (s *Store) GetMemory(id string) (*MemoryEntry, error) {
 	return entry, rows.Err()
 }
 
+// ListFilter narrows ListMemories to entries matching all given criteria;
+// zero-valued fields are unconstrained.
 type ListFilter struct {
 	Scope     string // "session" or "user"; empty means both
 	SessionID string // required when filtering scope == "session"
@@ -119,6 +127,7 @@ type ListFilter struct {
 	Limit     int
 }
 
+// ListMemories returns entries matching f, most recently created first.
 func (s *Store) ListMemories(f ListFilter) ([]*MemoryEntry, error) {
 	query := `SELECT DISTINCT e.id FROM memory_entries e`
 	var args []any
@@ -159,16 +168,16 @@ func (s *Store) ListMemories(f ListFilter) ([]*MemoryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
+
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -194,6 +203,7 @@ func (s *Store) ListMemories(f ListFilter) ([]*MemoryEntry, error) {
 // (with its own characteristic distance scale) replaces the stub.
 const defaultMaxDistance = 1.0
 
+// QueryInput configures a hybrid semantic + structured-filter search.
 type QueryInput struct {
 	Embedding []float32 // required; caller (MCP layer) resolves text -> vector before calling
 	Tags      []string
@@ -203,6 +213,9 @@ type QueryInput struct {
 	TopK      int
 }
 
+// Query returns up to TopK entries ranked by embedding distance to
+// q.Embedding, restricted to those within defaultMaxDistance and matching
+// every structured filter set on q.
 func (s *Store) Query(q QueryInput) ([]*MemoryEntry, error) {
 	if q.TopK <= 0 {
 		q.TopK = 10
@@ -252,17 +265,17 @@ func (s *Store) Query(q QueryInput) ([]*MemoryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
+
 	idByRowID := make(map[int64]string)
 	for rows.Next() {
 		var rowID int64
 		var id string
 		if err := rows.Scan(&rowID, &id); err != nil {
-			rows.Close()
 			return nil, err
 		}
 		idByRowID[rowID] = id
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}

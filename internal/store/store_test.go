@@ -8,7 +8,7 @@ func TestOpen_CreatesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() error = %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	var name string
 	row := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='memory_entries'`)

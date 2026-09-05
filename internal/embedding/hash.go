@@ -1,6 +1,9 @@
 package embedding
 
-import "hash/fnv"
+import (
+	"context"
+	"hash/fnv"
+)
 
 // HashProvider is a deterministic, non-semantic stand-in for a real
 // embedding model. It exists so the daemon is runnable and testable
@@ -10,11 +13,13 @@ type HashProvider struct {
 	dim int
 }
 
+// NewHashProvider returns a HashProvider that produces dim-dimensional vectors.
 func NewHashProvider(dim int) *HashProvider {
 	return &HashProvider{dim: dim}
 }
 
-func (p *HashProvider) Embed(text string) ([]float32, error) {
+// Embed implements Provider. It ignores ctx: hashing is CPU-only and never blocks.
+func (p *HashProvider) Embed(_ context.Context, text string) ([]float32, error) {
 	vec := make([]float32, p.dim)
 	h := fnv.New32a()
 	for i := 0; i < p.dim; i++ {

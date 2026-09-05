@@ -1,6 +1,9 @@
+// Command hivemindd is the Hivemind Local Edition daemon: an MCP server,
+// bound to loopback only, backed by SQLite + sqlite-vec.
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -23,16 +26,22 @@ func buildMCPServer(s *store.Store, embedder embedding.Provider) *mcp.Server {
 }
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		return fmt.Errorf("config: %w", err)
 	}
 
 	s, err := store.Open(cfg.DataDir, cfg.EmbeddingDim)
 	if err != nil {
-		log.Fatalf("store: %v", err)
+		return fmt.Errorf("store: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	embedder := embedding.NewHashProvider(cfg.EmbeddingDim)
 	mcpSrv := buildMCPServer(s, embedder)
@@ -44,5 +53,5 @@ func main() {
 
 	addr := "127.0.0.1:" + strconv.Itoa(cfg.Port)
 	log.Printf("hivemindd listening on %s (loopback only)", addr)
-	log.Fatal(http.ListenAndServe(addr, handler))
+	return http.ListenAndServe(addr, handler)
 }

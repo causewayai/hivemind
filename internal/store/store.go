@@ -1,3 +1,5 @@
+// Package store implements the SQLite-backed structured and vector storage
+// for the Local Edition daemon: memory entries, tags, and their embeddings.
 package store
 
 import (
@@ -13,11 +15,15 @@ func init() {
 	sqlite_vec.Auto()
 }
 
+// Store wraps a single SQLite database holding both the structured memory
+// tables and the sqlite-vec vector table.
 type Store struct {
 	db  *sql.DB
 	dim int
 }
 
+// Open opens (creating if necessary) a SQLite database at path, bootstraps
+// its schema, and configures a dim-dimensional vector table for embeddings.
 func Open(path string, dim int) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -29,17 +35,18 @@ func Open(path string, dim int) (*Store, error) {
 	}
 
 	if _, err := db.Exec(structuredSchema); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	if _, err := db.Exec(vectorSchema(dim)); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 
 	return &Store{db: db, dim: dim}, nil
 }
 
+// Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
 }
@@ -74,7 +81,7 @@ func (s *Store) searchVectors(query []float32, topK int) ([]int64, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var ids []int64
 	for rows.Next() {
@@ -104,7 +111,7 @@ func (s *Store) searchVectorsWithDistance(query []float32, topK int) ([]vecMatch
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var matches []vecMatch
 	for rows.Next() {

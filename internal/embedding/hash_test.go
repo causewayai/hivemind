@@ -1,15 +1,19 @@
 package embedding
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestHashProvider_Deterministic(t *testing.T) {
 	p := NewHashProvider(768)
+	ctx := context.Background()
 
-	v1, err := p.Embed("hello world")
+	v1, err := p.Embed(ctx, "hello world")
 	if err != nil {
 		t.Fatalf("Embed() error = %v", err)
 	}
-	v2, err := p.Embed("hello world")
+	v2, err := p.Embed(ctx, "hello world")
 	if err != nil {
 		t.Fatalf("Embed() error = %v", err)
 	}

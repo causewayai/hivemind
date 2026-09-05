@@ -1,0 +1,76 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - revive
+    - gocritic
+    - misspell
+    - unconvert
+    - errname
+    - unparam
+    - copyloopvar
+    - sqlclosecheck
+    - rowserrcheck
+    - depguard
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: receiver-naming
+        - name: indent-error-flow
+        - name: error-strings
+        - name: error-naming
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: context-as-argument
+        - name: increment-decrement
+
+    depguard:
+      rules:
+        # Foundational layer: no dependency on anything else in this module.
+        #
+        # NOTE on the "files" glob: this depguard version's doublestar
+        # matcher requires BOTH a leading "**/" (to skip whatever base path
+        # prefix it matches against) AND a trailing "**" (a bare
+        # "dir/**/*.go" never matches files directly in dir, only in a
+        # subdirectory of dir) — i.e. exactly "**/dir/**". Verified
+        # empirically by injecting real cross-layer imports and confirming
+        # each rule actually fires; see docs/DESIGN.md.
+        config:
+          files:
+            - "**/internal/config/**"
+          deny:
+            - pkg: github.com/causewayai/hivemind
+              desc: "internal/config is a foundational package and must not depend on any other package in this module"
+
+        embedding:
+          files:
+            - "**/internal/embedding/**"
+          deny:
+            - pkg: github.com/causewayai/hivemind
+              desc: "internal/embedding is a foundational package and must not depend on any other package in this module"
+
+        store:
+          files:
+            - "**/internal/store/**"
+          deny:
+            - pkg: github.com/causewayai/hivemind
+              desc: "internal/store is a foundational package (embeddings are passed in as []float32) and must not depend on any other package in this module"
+
+        # Service layer: may depend on the foundational packages above, but
+        # not on the daemon entrypoint that wires it together.
+        mcpserver:
+          files:
+            - "**/internal/mcpserver/**"
+          deny:
+            - pkg: github.com/causewayai/hivemind/cmd
+              desc: "internal packages must not depend on cmd/hivemindd, the composition root"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
