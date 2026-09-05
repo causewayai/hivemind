@@ -87,7 +87,7 @@ now — add later on demand.
   each archive's sha256 from `checksums.txt`, renders the Homebrew formula
   and Scoop manifest from a template (simple string substitution — no
   templating library needed), and pushes the result as a commit to
-  `causewayai/homebrew-causewayai` / `causewayai/scoop-hivemind` using a
+  `causewayai/homebrew-causewayai` / `causewayai/scoop-causewayai` using a
   cross-repo PAT.
 
 ---
@@ -112,7 +112,7 @@ now — add later on demand.
 
 ## Scoop bucket (Windows)
 
-- **Repo:** `causewayai/scoop-hivemind`, private. GoReleaser pushes an
+- **Repo:** `causewayai/scoop-causewayai`, private. GoReleaser pushes an
   updated manifest JSON on every release.
 - **Install flow:** `scoop bucket add hivemind ... && scoop install hivemindd`.
 - **Service management:** out of scope. Scoop has no `brew services`
@@ -130,7 +130,7 @@ now — add later on demand.
   one-time setup step in the README; it's the deliberate friction traded
   for keeping the source private.
 - **CI:** the release workflow needs a token with write access to both
-  `homebrew-causewayai` and `scoop-hivemind` — the default per-run
+  `homebrew-causewayai` and `scoop-causewayai` — the default per-run
   `GITHUB_TOKEN` can't push to other repos — stored as a repo secret
   (`HOMEBREW_TAP_TOKEN`) in `causewayai/hivemind`.
 
