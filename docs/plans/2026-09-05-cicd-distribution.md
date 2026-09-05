@@ -479,11 +479,22 @@ jobs:
         if: runner.os == 'Windows'
         run: echo "C:\Strawberry\c\bin" >> $env:GITHUB_PATH
 
+      - name: Pre-fetch modules (so CGO_CFLAGS path resolution has something to resolve)
+        run: go mod download
+        shell: bash
+
       - name: Build
         shell: bash
         env:
           CGO_ENABLED: 1
         run: |
+          # Same fix as ci.yml/Makefile (see docs/DESIGN.md, "Windows CI
+          # cgo toolchain"): sqlite-vec-go-bindings needs sqlite3ext.h,
+          # which only mattn/go-sqlite3 vendors. This workflow calls `go
+          # build` directly rather than through `make build`, so it needs
+          # the same CGO_CFLAGS fix applied inline rather than inheriting
+          # it from the Makefile.
+          export CGO_CFLAGS="-I$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3 | tr '\\' '/')"
           VERSION="${GITHUB_REF_NAME#v}"
           COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
