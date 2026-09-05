@@ -31,3 +31,17 @@ Task 8 of `docs/plans/2026-09-04-local-daemon.md` originally implemented hybrid 
 **Open item:** `1.0` is tuned against `HashProvider`'s output spread ([-1,1) per dimension), not any real embedding model's distance scale. When a real provider (OpenAI-compatible endpoint, etc. — see plan's "After this plan" section) is plugged in, this threshold will need recalibration, and likely should become configurable rather than a hardcoded constant.
 
 **Downstream consequence for test fixtures (discovered in Task 10):** because `HashProvider` is explicitly non-semantic, two unrelated strings hash to essentially uncorrelated vectors — so a fixture that writes content like `"A's secret"` and later queries `"secret"`, expecting the write to come back, will usually fail the distance cutoff purely by hash-noise coincidence, with no bearing on the behavior actually under test (session/scope isolation, not semantic recall). The fix used in `internal/mcpserver/query_test.go` is to pin fixtures to an explicit precomputed embedding (via `MemoryWriteInput.Embedding` / `CreateMemoryInput.Embedding`) matching the query's embedding, so semantic distance is trivially satisfied and the test isolates the structural behavior it's named for. Any later test exercising `memory_query`/`Store.Query` for non-semantic purposes should follow the same pattern.
+
+---
+
+## MCP SDK v1.7.0 tool-handler shape (resolved during Task 12)
+
+The plan (`docs/plans/2026-09-04-local-daemon.md`, Task 12) assumed `mcp.AddTool` handlers had the shape `func(ctx, In) (*Out, error)`, flagged as the area of "least certainty" in the plan's own research. Reading the installed `github.com/modelcontextprotocol/go-sdk@v1.7.0` source directly (`mcp/tool.go`) showed the actual generic type is:
+
+```go
+type ToolHandlerFor[In, Out any] func(_ context.Context, request *CallToolRequest, input In) (result *CallToolResult, output Out, _ error)
+```
+
+— three parameters (ctx, request, input) and three return values (result, output, error), not two and two. Returning `(nil, out, nil)` is sufficient; the SDK auto-marshals a non-nil `out` into `CallToolResult.StructuredContent` when `result` is nil (see `toolForErr` in `mcp/server.go`).
+
+**Resolution:** kept the existing unit-tested `handle*` methods (`handleMemoryWrite`, `handleMemoryQuery`, `handleListScopes` in `internal/mcpserver`) with their original simple `(ctx, In) -> (*Out, error)` shape — their tests didn't need to change. Added a thin adapter layer, `internal/mcpserver/adapters.go` (`HandleMemoryWrite`, `HandleMemoryQuery`, `HandleListScopes`), matching `ToolHandlerFor` exactly, used only when wiring `mcp.AddTool` in `cmd/hivemindd/main.go`.
