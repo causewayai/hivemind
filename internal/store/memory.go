@@ -184,6 +184,123 @@ func (s *Store) ListMemories(f ListFilter) ([]*MemoryEntry, error) {
 	return entries, nil
 }
 
+// defaultMaxDistance is a relevance cutoff (L2 distance) applied to vector
+// search candidates before structured filters run. Without it, "hybrid"
+// retrieval degrades to "tag filter with re-ranking" — a candidate that
+// matches on tags but is semantically unrelated to the query would still
+// surface, since tag-matching alone doesn't bound how dissimilar a vector is.
+// This value is a heuristic tuned against HashProvider's spread ([-1,1) per
+// dimension); it will need recalibration once a real embedding provider
+// (with its own characteristic distance scale) replaces the stub.
+const defaultMaxDistance = 1.0
+
+type QueryInput struct {
+	Embedding []float32 // required; caller (MCP layer) resolves text -> vector before calling
+	Tags      []string
+	Scope     string
+	SessionID string
+	Source    string
+	TopK      int
+}
+
+func (s *Store) Query(q QueryInput) ([]*MemoryEntry, error) {
+	if q.TopK <= 0 {
+		q.TopK = 10
+	}
+
+	candidatePool := q.TopK * 5
+	matches, err := s.searchVectorsWithDistance(q.Embedding, candidatePool)
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return nil, nil
+	}
+
+	rowIDs := make([]int64, 0, len(matches))
+	for _, m := range matches {
+		if m.Distance > defaultMaxDistance {
+			continue
+		}
+		rowIDs = append(rowIDs, m.RowID)
+	}
+	if len(rowIDs) == 0 {
+		return nil, nil
+	}
+
+	placeholders := make([]string, len(rowIDs))
+	args := make([]any, len(rowIDs))
+	for i, id := range rowIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := `SELECT rowid, id FROM memory_entries WHERE rowid IN (` + joinPlaceholders(placeholders) + `)`
+	if q.Scope != "" {
+		query += " AND scope = ?"
+		args = append(args, q.Scope)
+	}
+	if q.SessionID != "" {
+		query += " AND session_id = ?"
+		args = append(args, q.SessionID)
+	}
+	if q.Source != "" {
+		query += " AND source = ?"
+		args = append(args, q.Source)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	idByRowID := make(map[int64]string)
+	for rows.Next() {
+		var rowID int64
+		var id string
+		if err := rows.Scan(&rowID, &id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		idByRowID[rowID] = id
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	results := make([]*MemoryEntry, 0, len(idByRowID))
+	for _, rowID := range rowIDs {
+		id, ok := idByRowID[rowID]
+		if !ok {
+			continue
+		}
+		entry, err := s.GetMemory(id)
+		if err != nil {
+			return nil, err
+		}
+		if len(q.Tags) > 0 && !hasAnyTag(entry.Tags, q.Tags) {
+			continue
+		}
+		results = append(results, entry)
+		if len(results) == q.TopK {
+			break
+		}
+	}
+	return results, nil
+}
+
+func hasAnyTag(entryTags, wantTags []string) bool {
+	set := make(map[string]bool, len(entryTags))
+	for _, t := range entryTags {
+		set[t] = true
+	}
+	for _, want := range wantTags {
+		if set[want] {
+			return true
+		}
+	}
+	return false
+}
+
 func joinPlaceholders(items []string) string {
 	out := items[0]
 	for _, s := range items[1:] {

@@ -72,3 +72,42 @@ func TestListMemories_FilterByScopeAndTag(t *testing.T) {
 		t.Fatalf("ListMemories() returned %d entries, want 1", len(got))
 	}
 }
+
+func TestQuery_HybridSemanticAndTagFilter(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir+"/test.db", 4)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+
+	near := []float32{0.1, 0.1, 0.1, 0.1}
+	far := []float32{9.9, 9.9, 9.9, 9.9}
+
+	if _, err := s.CreateMemory(CreateMemoryInput{
+		Content: "relevant, tagged", Scope: "user", Source: "etl-jira", SourceType: "harness",
+		Tags: []string{"ci"}, Embedding: near,
+	}); err != nil {
+		t.Fatalf("CreateMemory() error = %v", err)
+	}
+	if _, err := s.CreateMemory(CreateMemoryInput{
+		Content: "relevant, untagged", Scope: "user", Source: "etl-jira", SourceType: "harness",
+		Tags: nil, Embedding: near,
+	}); err != nil {
+		t.Fatalf("CreateMemory() error = %v", err)
+	}
+	if _, err := s.CreateMemory(CreateMemoryInput{
+		Content: "tagged, irrelevant", Scope: "user", Source: "etl-jira", SourceType: "harness",
+		Tags: []string{"ci"}, Embedding: far,
+	}); err != nil {
+		t.Fatalf("CreateMemory() error = %v", err)
+	}
+
+	got, err := s.Query(QueryInput{Embedding: near, Tags: []string{"ci"}, TopK: 5})
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if len(got) != 1 || got[0].Content != "relevant, tagged" {
+		t.Fatalf("Query() = %+v, want exactly the 'relevant, tagged' entry", got)
+	}
+}
