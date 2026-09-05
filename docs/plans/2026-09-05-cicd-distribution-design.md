@@ -60,24 +60,32 @@ now — add later on demand.
 ## Release pipeline (tag-triggered)
 
 - **Trigger:** pushing a tag matching `v*.*.*` (semver, e.g. `v0.3.0`).
-- **Tooling:** [GoReleaser](https://goreleaser.com/), driven by one
-  `.goreleaser.yml`. Because cgo blocks cross-compilation, the release
-  workflow runs **one GoReleaser job per native OS/arch runner** using
-  GoReleaser's partial-build mode (`--single-target`), then a final job
-  merges the partial builds into one GitHub Release — GoReleaser's
-  documented pattern for cgo-heavy projects.
-- **Artifacts:** per platform/arch, a `.tar.gz` (macOS/Linux) or `.zip`
-  (Windows) containing the `hivemindd` binary, plus a combined
-  `checksums.txt` for the release as a whole.
-- **Version embedding:** version, commit, and build date injected via
-  `-ldflags` into a `main.version`-style variable, surfaced through
-  `hivemindd --version`, so an installed binary's provenance is verifiable.
-- **Changelog:** GoReleaser's default changelog generation from commit
-  messages between tags, attached to the GitHub Release notes.
-- **Tap/bucket fan-out:** the final release job updates the Homebrew
-  formula and Scoop manifest (below) with the new version and per-asset
-  checksums, via GoReleaser's native `brews:` and `scoops:` config blocks,
-  which push a commit to each target repo directly.
+- **Tooling decision (revised):** GoReleaser's ability to merge native
+  per-OS cgo builds into one release + one Homebrew/Scoop manifest requires
+  **GoReleaser Pro** (paid) — its `split`/`continue --merge` orchestration
+  and its `prebuilt` builder (needed to feed externally-built binaries into
+  the `brews:`/`scoops:` pipes) are both Pro-only features, confirmed
+  against GoReleaser's own docs. Decision: **hand-roll it** with plain
+  `go build` per OS and a scripted final publish step — no GoReleaser
+  dependency, no license cost, more workflow YAML/scripts to own.
+- **Per-OS build jobs:** each of the 4 platform/arch legs runs `go build`
+  directly with `-ldflags "-X main.version=... -X main.commit=... -X
+  main.date=..."`, then archives the binary (`.tar.gz` for macOS/Linux,
+  `.zip` for Windows) and uploads it as a workflow artifact.
+- **Publish job:** a final `ubuntu-latest` job downloads all 4 archives,
+  computes a combined `checksums.txt` (`sha256sum`), and creates the
+  GitHub Release via `gh release create <tag> <archives...> checksums.txt
+  --generate-notes` — `--generate-notes` gives an auto-generated changelog
+  from merged PRs since the last tag, replacing GoReleaser's changelog pipe.
+- **Version embedding:** version/commit/date injected via `-ldflags` into
+  `main` package vars, surfaced through `hivemindd --version`, so an
+  installed binary's provenance is verifiable.
+- **Tap/bucket fan-out:** the publish job (or a job depending on it) reads
+  each archive's sha256 from `checksums.txt`, renders the Homebrew formula
+  and Scoop manifest from a template (simple string substitution — no
+  templating library needed), and pushes the result as a commit to
+  `causewayai/homebrew-hivemind` / `causewayai/scoop-hivemind` using a
+  cross-repo PAT.
 
 ---
 
@@ -138,12 +146,13 @@ now — add later on demand.
 
 ## Open items for the implementation plan
 
-- Confirm which mingw-w64/GCC setup action reliably builds
-  `mattn/go-sqlite3` + `sqlite-vec-go-bindings` cgo on `windows-latest` —
-  this is the least-proven leg of the whole matrix and should be spiked
-  first.
-- Confirm GoReleaser's multi-job partial-build-then-merge pattern works
-  cleanly with three separate OS runners in one GitHub Actions workflow
-  (job dependencies, artifact passing between jobs).
+- Confirm which mingw-w64/GCC setup reliably builds `mattn/go-sqlite3` +
+  `sqlite-vec-go-bindings` cgo on `windows-latest` — this is the
+  least-proven leg of the whole matrix and should be spiked first (the
+  GitHub-hosted Windows runner ships a MinGW GCC via its bundled Strawberry
+  Perl install, at `C:\Strawberry\c\bin\gcc.exe`, which is the usual
+  zero-install trick for Go cgo projects on `windows-latest` — verify it
+  actually links these two cgo dependencies before relying on it, with
+  `msys2/setup-msys2` as a fallback if it doesn't).
 - Decide the exact `service do` block contents (log paths, working
   directory, restart policy) for the Homebrew formula.
