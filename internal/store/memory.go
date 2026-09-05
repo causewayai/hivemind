@@ -111,6 +111,95 @@ func (s *Store) GetMemory(id string) (*MemoryEntry, error) {
 	return entry, rows.Err()
 }
 
+type ListFilter struct {
+	Scope     string // "session" or "user"; empty means both
+	SessionID string // required when filtering scope == "session"
+	Tags      []string
+	Source    string
+	Limit     int
+}
+
+func (s *Store) ListMemories(f ListFilter) ([]*MemoryEntry, error) {
+	query := `SELECT DISTINCT e.id FROM memory_entries e`
+	var args []any
+	var where []string
+
+	if len(f.Tags) > 0 {
+		query += ` JOIN memory_tags t ON t.memory_id = e.id`
+		placeholders := make([]string, len(f.Tags))
+		for i, tag := range f.Tags {
+			placeholders[i] = "?"
+			args = append(args, tag)
+		}
+		where = append(where, "t.tag IN ("+joinPlaceholders(placeholders)+")")
+	}
+	if f.Scope != "" {
+		where = append(where, "e.scope = ?")
+		args = append(args, f.Scope)
+	}
+	if f.SessionID != "" {
+		where = append(where, "e.session_id = ?")
+		args = append(args, f.SessionID)
+	}
+	if f.Source != "" {
+		where = append(where, "e.source = ?")
+		args = append(args, f.Source)
+	}
+
+	if len(where) > 0 {
+		query += " WHERE " + joinAnd(where)
+	}
+	query += " ORDER BY e.created_at DESC"
+	if f.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, f.Limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	entries := make([]*MemoryEntry, 0, len(ids))
+	for _, id := range ids {
+		entry, err := s.GetMemory(id)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func joinPlaceholders(items []string) string {
+	out := items[0]
+	for _, s := range items[1:] {
+		out += ", " + s
+	}
+	return out
+}
+
+func joinAnd(clauses []string) string {
+	out := clauses[0]
+	for _, c := range clauses[1:] {
+		out += " AND " + c
+	}
+	return out
+}
+
 func nullable(s string) any {
 	if s == "" {
 		return nil

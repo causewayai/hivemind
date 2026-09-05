@@ -42,3 +42,33 @@ func TestCreateMemory(t *testing.T) {
 		t.Errorf("Tags = %v, want 2 tags", got.Tags)
 	}
 }
+
+func TestListMemories_FilterByScopeAndTag(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir+"/test.db", 8)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+
+	mustCreate := func(scope, sessionID string, tags []string) {
+		if _, err := s.CreateMemory(CreateMemoryInput{
+			Content: "entry", Scope: scope, SessionID: sessionID,
+			Source: "claude-code", SourceType: "harness", Tags: tags,
+		}); err != nil {
+			t.Fatalf("CreateMemory() error = %v", err)
+		}
+	}
+	mustCreate("session", "sess-1", []string{"ci"})
+	mustCreate("session", "sess-2", []string{"ci"})
+	mustCreate("user", "", []string{"ci"})
+	mustCreate("session", "sess-1", []string{"other"})
+
+	got, err := s.ListMemories(ListFilter{Scope: "session", SessionID: "sess-1", Tags: []string{"ci"}})
+	if err != nil {
+		t.Fatalf("ListMemories() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListMemories() returned %d entries, want 1", len(got))
+	}
+}
