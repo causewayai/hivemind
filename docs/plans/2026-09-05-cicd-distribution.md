@@ -150,9 +150,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             name: macos-arm64
-          - os: macos-13
+          - os: macos-15-intel
             name: macos-amd64
           - os: ubuntu-latest
             name: linux-amd64
@@ -414,11 +414,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             goos: darwin
             goarch: arm64
             archive: tar.gz
-          - os: macos-13
+          - os: macos-15-intel
             goos: darwin
             goarch: amd64
             archive: tar.gz

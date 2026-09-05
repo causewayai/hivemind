@@ -45,9 +45,12 @@ now — add later on demand.
 ## CI (pull request / push to `main`)
 
 - **Trigger:** every PR and every push to `main`.
-- **Matrix:** `macos-latest` (arm64), `macos-13` (amd64), `ubuntu-latest`
+- **Matrix:** `macos-15` (arm64), `macos-15-intel` (amd64), `ubuntu-latest`
   (amd64), `windows-latest` (amd64) — same 4 legs as the release matrix, so
   a platform-specific cgo break surfaces before merge, not at tag time.
+  (`macos-13` was fully retired by GitHub in December 2025 and `macos-14`
+  is itself mid-deprecation as of this writing, retiring November 2026 —
+  `macos-15`/`macos-15-intel` are the current stable labels.)
 - **Per-leg steps:** checkout → set up Go 1.25 → ensure a C compiler is
   present (Xcode Command Line Tools on macOS, `gcc` on Linux, a
   mingw-w64/GCC toolchain on Windows — cgo here needs real GCC, not MSVC)
