@@ -289,17 +289,19 @@ class Hivemindd < Formula
   on_macos do
     on_arm do
       url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_darwin_arm64.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
     on_intel do
       url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_darwin_amd64.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
 
   on_linux do
-    url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_linux_amd64.tar.gz"
-    sha256 "0000000000000000000000000000000000000000000000000000000000000"
+    on_intel do
+      url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_linux_amd64.tar.gz"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+    end
   end
 
   def install
@@ -335,7 +337,7 @@ Add `bucket/hivemindd.json` to `scoop-causewayai`:
   "architecture": {
     "64bit": {
       "url": "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_windows_amd64.zip",
-      "hash": "0000000000000000000000000000000000000000000000000000000000000"
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   },
   "bin": "hivemindd.exe",
@@ -551,8 +553,10 @@ git commit -m "ci: add per-OS release build/archive jobs"
             end
 
             on_linux do
-              url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_linux_amd64.tar.gz"
-              sha256 "${LINUX_AMD64_SHA}"
+              on_intel do
+                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_linux_amd64.tar.gz"
+                sha256 "${LINUX_AMD64_SHA}"
+              end
             end
 
             def install
