@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macos-arm64
+          - os: macos-13
+            name: macos-amd64
+          - os: ubuntu-latest
+            name: linux-amd64
+          - os: windows-latest
+            name: windows-amd64
+    runs-on: ${{ matrix.os }}
+    name: test (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Configure MinGW GCC (Windows only)
+        if: runner.os == 'Windows'
+        run: echo "C:\Strawberry\c\bin" >> $env:GITHUB_PATH
+
+      - name: Verify C compiler
+        run: go env CC && (go env CC | xargs which 2>/dev/null || where $(go env CC))
+        shell: bash
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - name: make check
+        run: make check
+        shell: bash
