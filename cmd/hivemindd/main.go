@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/causewayai/hivemind/internal/config"
@@ -14,6 +15,16 @@ import (
 	"github.com/causewayai/hivemind/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+func versionString() string {
+	return fmt.Sprintf("hivemindd %s (commit %s, built %s)", version, commit, date)
+}
 
 func buildMCPServer(s *store.Store, embedder embedding.Provider) *mcp.Server {
 	srv := mcpserver.New(s, embedder)
@@ -26,6 +37,10 @@ func buildMCPServer(s *store.Store, embedder embedding.Provider) *mcp.Server {
 }
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Println(versionString())
+		return
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}

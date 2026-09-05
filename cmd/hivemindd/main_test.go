@@ -11,6 +11,19 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+func TestVersionString(t *testing.T) {
+	version = "1.2.3"
+	commit = "abc1234"
+	date = "2026-09-05T00:00:00Z"
+	defer func() { version, commit, date = "dev", "none", "unknown" }()
+
+	got := versionString()
+	want := "hivemindd 1.2.3 (commit abc1234, built 2026-09-05T00:00:00Z)"
+	if got != want {
+		t.Errorf("versionString() = %q, want %q", got, want)
+	}
+}
+
 func TestDaemon_WriteThenQuery(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(dir+"/test.db", 768)
