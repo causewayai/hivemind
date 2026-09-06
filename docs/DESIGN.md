@@ -63,3 +63,17 @@ A first run against the Task 1–13 implementation surfaced 42 real issues, all 
 - `"internal/config/**"` (no leading `**/`) — also silently matches nothing; the leading `**/` is required to skip whatever base path prefix the matcher compares against.
 
 Because a wrong glob fails *silently* (the linter reports 0 issues either way), any new `depguard` rule added later should be verified the same way this one was: inject a real cross-layer import, confirm it's flagged, then revert.
+
+---
+
+## Windows CI cgo toolchain
+
+The CI/CD plan (`docs/plans/2026-09-05-cicd-distribution.md`, Task 2) flagged the Windows leg as its least-proven step, since both `mattn/go-sqlite3` and `sqlite-vec-go-bindings` compile C code via cgo. Two distinct, unrelated failures had to be resolved in sequence before it went green — worth recording so neither gets "fixed" back into existence by someone trying to simplify the workflow later.
+
+**Failure 1 — `sqlite3ext.h: No such file or directory`.** `sqlite-vec-go-bindings`'s C shim `#include "sqlite3ext.h"` without shipping that header itself; it relies on it being reachable on the C include path. That header happens to already be discoverable on the Linux/macOS GitHub-hosted runner images (likely a system `sqlite3-dev` package), but not on `windows-latest`. `mattn/go-sqlite3` vendors the header at its own module root, so the fix points `CGO_CFLAGS` at that module's directory: `export CGO_CFLAGS := -I$(subst \,/,$(shell go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3))` in the `Makefile`. Two details made this non-obvious:
+- `go list -m -f '{{.Dir}}'` needs the module already present in the local module cache to report a real path; on a cold Windows runner it wasn't yet (the module only got fetched later, during `go vet`'s own dependency resolution), so an explicit `go mod download` step was added to the workflow *before* `make check` runs, to guarantee the module is on disk by the time `Makefile`'s top-level `:=` assignment evaluates the `$(shell ...)` call.
+- `go list -m` on Windows returns a backslash-separated path. Substituted unquoted into a Bash-run recipe command line, an unescaped backslash is consumed as a shell escape character, silently collapsing the path (`C:\Users\...` → `C:Users...`) and reproducing the exact same "header not found" error even though `CGO_CFLAGS` looked superficially correct. `$(subst \,/,...)` normalizes to forward slashes inside Make itself (not the recipe shell) before the path ever reaches Bash — MinGW GCC accepts forward-slash paths on Windows too, so this is a no-op on macOS/Linux.
+
+**Failure 2 — gofmt flags every file as unformatted, once cgo actually started compiling.** `windows-latest`'s Git checkout was converting files to CRLF on checkout, and `gofmt` (run via `golangci-lint`) treats CRLF as "not properly formatted" regardless of the content's actual formatting. Fixed with a repo-root `.gitattributes` (`* text=auto eol=lf`), which normalizes line endings to LF on checkout on every platform — not just a CI workaround, since a contributor's own Windows git config (`core.autocrlf=true` is a common default) would otherwise hit the same thing locally.
+
+With both fixed, `windows-latest` needed no MSYS2/mingw-w64 fallback — the Strawberry Perl-bundled GCC that ships on the GitHub-hosted Windows runner image (added to `PATH` via the `Configure MinGW GCC` step) was sufficient once the include path and line-ending issues were resolved.

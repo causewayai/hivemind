@@ -1,0 +1,206 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            goos: darwin
+            goarch: arm64
+            archive: tar.gz
+          - os: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            archive: tar.gz
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            archive: tar.gz
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Configure MinGW GCC (Windows only)
+        if: runner.os == 'Windows'
+        run: echo "C:\Strawberry\c\bin" >> $env:GITHUB_PATH
+
+      - name: Pre-fetch modules (so CGO_CFLAGS path resolution has something to resolve)
+        run: go mod download
+        shell: bash
+
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: 1
+        run: |
+          # Same fix as ci.yml/Makefile (see docs/DESIGN.md, "Windows CI
+          # cgo toolchain"): sqlite-vec-go-bindings needs sqlite3ext.h,
+          # which only mattn/go-sqlite3 vendors. This workflow calls `go
+          # build` directly rather than through `make build`, so it needs
+          # the same CGO_CFLAGS fix applied inline rather than inheriting
+          # it from the Makefile.
+          export CGO_CFLAGS="-I$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3 | tr '\\' '/')"
+          VERSION="${GITHUB_REF_NAME#v}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          EXT=""
+          [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
+          go build -ldflags "-X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE" \
+            -o "hivemindd${EXT}" ./cmd/hivemindd
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        run: tar -czf "hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" hivemindd
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          zip "hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.zip" hivemindd.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Mint a scoped tap/bucket access token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: causewayai
+          repositories: homebrew-causewayai,scoop-causewayai
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum hivemindd_* > checksums.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
+
+      - name: Compute per-asset checksums for tap/bucket
+        working-directory: dist
+        run: |
+          echo "DARWIN_ARM64_SHA=$(grep darwin_arm64 checksums.txt | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "DARWIN_AMD64_SHA=$(grep darwin_amd64 checksums.txt | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "LINUX_AMD64_SHA=$(grep linux_amd64 checksums.txt | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "WINDOWS_AMD64_SHA=$(grep windows_amd64 checksums.txt | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Update Homebrew tap
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/homebrew-causewayai.git" tap
+          cat > tap/Formula/hivemindd.rb <<EOF
+          class Hivemindd < Formula
+            desc "Local persistent memory daemon for AI harnesses (MCP over HTTP)"
+            homepage "https://github.com/causewayai/hivemind"
+            version "${VERSION}"
+            license "UNLICENSED"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_darwin_arm64.tar.gz"
+                sha256 "${DARWIN_ARM64_SHA}"
+              end
+              on_intel do
+                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_darwin_amd64.tar.gz"
+                sha256 "${DARWIN_AMD64_SHA}"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_linux_amd64.tar.gz"
+                sha256 "${LINUX_AMD64_SHA}"
+              end
+            end
+
+            def install
+              bin.install "hivemindd"
+            end
+
+            service do
+              run [opt_bin/"hivemindd"]
+              keep_alive true
+              log_path var/"log/hivemindd.log"
+              error_log_path var/"log/hivemindd.log"
+              working_dir var
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/hivemindd --version")
+            end
+          end
+          EOF
+          cd tap
+          git config user.name "causeway-release-bot"
+          git config user.email "actions@github.com"
+          git add Formula/hivemindd.rb
+          git commit -m "hivemindd ${VERSION}"
+          git push
+
+      - name: Update Scoop bucket
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/scoop-causewayai.git" bucket
+          cat > bucket/bucket/hivemindd.json <<EOF
+          {
+            "version": "${VERSION}",
+            "description": "Local persistent memory daemon for AI harnesses (MCP over HTTP)",
+            "homepage": "https://github.com/causewayai/hivemind",
+            "license": "UNLICENSED",
+            "architecture": {
+              "64bit": {
+                "url": "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_windows_amd64.zip",
+                "hash": "${WINDOWS_AMD64_SHA}"
+              }
+            },
+            "bin": "hivemindd.exe",
+            "checkver": {
+              "github": "https://github.com/causewayai/hivemind"
+            }
+          }
+          EOF
+          cd bucket
+          git config user.name "causeway-release-bot"
+          git config user.email "actions@github.com"
+          git add bucket/hivemindd.json
+          git commit -m "hivemindd ${VERSION}"
+          git push

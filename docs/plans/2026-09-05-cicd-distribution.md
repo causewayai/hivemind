@@ -14,11 +14,12 @@ CI and release both run as GitHub Actions matrices of native
 The release workflow adds a final Linux job that collects all 4 platform
 archives, cuts the GitHub Release with `gh release create --generate-notes`,
 and pushes a hand-templated Homebrew formula / Scoop manifest to two new
-private sibling repos using a cross-repo PAT.
+private sibling repos, authenticating as a GitHub App installation
+(short-lived, scoped to just those two repos) rather than a static PAT.
 
 **Tech Stack:** GitHub Actions, Go 1.25 (cgo), `gh` CLI, plain shell/`sha256sum`
-for checksums, a Homebrew tap repo (`causewayai/homebrew-hivemind`) and a
-Scoop bucket repo (`causewayai/scoop-hivemind`).
+for checksums, a Homebrew tap repo (`causewayai/homebrew-causewayai`) and a
+Scoop bucket repo (`causewayai/scoop-causewayai`).
 
 ---
 
@@ -32,7 +33,7 @@ the user rather than silently deviating.
 
 Several tasks below create real GitHub resources (two new repos, a
 repo secret, a pushed release tag) or ask the user to create a credential
-(a PAT). These are called out explicitly — **stop and confirm with the
+(a GitHub App). These are called out explicitly — **stop and confirm with the
 user before taking that specific action**, per this project's standing
 rule about hard-to-reverse or shared-state changes. Everything else
 (editing files, opening a PR, pushing a branch) is normal, low-risk
@@ -150,9 +151,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             name: macos-arm64
-          - os: macos-13
+          - os: macos-15-intel
             name: macos-amd64
           - os: ubuntu-latest
             name: linux-amd64
@@ -267,9 +268,9 @@ if they'd rather you do it, listing the exact contexts first.
 running these commands.**
 
 ```bash
-gh repo create causewayai/homebrew-hivemind --private \
+gh repo create causewayai/homebrew-causewayai --private \
   --description "Homebrew tap for hivemindd" 
-gh repo create causewayai/scoop-hivemind --private \
+gh repo create causewayai/scoop-causewayai --private \
   --description "Scoop bucket for hivemindd"
 ```
 
@@ -289,17 +290,19 @@ class Hivemindd < Formula
   on_macos do
     on_arm do
       url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_darwin_arm64.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
     on_intel do
       url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_darwin_amd64.tar.gz"
-      sha256 "0000000000000000000000000000000000000000000000000000000000000"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
     end
   end
 
   on_linux do
-    url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_linux_amd64.tar.gz"
-    sha256 "0000000000000000000000000000000000000000000000000000000000000"
+    on_intel do
+      url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_linux_amd64.tar.gz"
+      sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+    end
   end
 
   def install
@@ -320,11 +323,11 @@ class Hivemindd < Formula
 end
 ```
 
-Commit and push this placeholder to `main` on `homebrew-hivemind`.
+Commit and push this placeholder to `main` on `homebrew-causewayai`.
 
 **Step 2: Seed the bucket repo with a placeholder manifest**
 
-Add `bucket/hivemindd.json` to `scoop-hivemind`:
+Add `bucket/hivemindd.json` to `scoop-causewayai`:
 
 ```json
 {
@@ -335,7 +338,7 @@ Add `bucket/hivemindd.json` to `scoop-hivemind`:
   "architecture": {
     "64bit": {
       "url": "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_windows_amd64.zip",
-      "hash": "0000000000000000000000000000000000000000000000000000000000000"
+      "hash": "0000000000000000000000000000000000000000000000000000000000000000"
     }
   },
   "bin": "hivemindd.exe",
@@ -345,49 +348,88 @@ Add `bucket/hivemindd.json` to `scoop-hivemind`:
 }
 ```
 
-Commit and push this placeholder to `main` on `scoop-hivemind`.
+Commit and push this placeholder to `main` on `scoop-causewayai`.
 
 **Step 3: Confirm both repos exist and have the placeholder file**
 
 ```bash
-gh api repos/causewayai/homebrew-hivemind/contents/Formula/hivemindd.rb --jq .name
-gh api repos/causewayai/scoop-hivemind/contents/bucket/hivemindd.json --jq .name
+gh api repos/causewayai/homebrew-causewayai/contents/Formula/hivemindd.rb --jq .name
+gh api repos/causewayai/scoop-causewayai/contents/bucket/hivemindd.json --jq .name
 ```
 Expected: each prints the filename, confirming the push landed.
 
 ---
 
-### Task 4: Set up the cross-repo PAT
+### Task 4: Set up a GitHub App for cross-repo release automation
 
-**This asks the user to create a credential — do not attempt to automate
-PAT creation; GitHub doesn't expose an API for minting new PATs on a
-user's behalf.**
+**Revised from an earlier static-PAT design.** A GitHub App's
+installation access tokens are minted fresh per workflow run and expire
+after 1 hour, versus a PAT sitting as a long-lived secret in repo
+settings indefinitely — meaningfully less blast radius for a credential
+that only automation ever uses. (The separate end-user PAT documented
+under "Access" in the design doc, for a human's own `brew`/`scoop
+install`, stays a PAT — a 1-hour token isn't practical for a person's
+shell profile, and that's a different threat model: an individually
+owned, revocable credential vs. a shared bot secret.)
 
-**Step 1: Ask the user to create a fine-grained PAT**
+**This requires manual setup in the GitHub UI — there's no `gh` CLI or
+API path to create a GitHub App. Ask the user to do this and report back
+the App ID and private key; do not attempt to automate it.**
+
+**Step 1: Ask the user to create an org-owned GitHub App**
 
 Tell the user: go to
-https://github.com/settings/personal-access-tokens/new, create a
-fine-grained token scoped to the `causewayai` org, restricted to the two
-repos `homebrew-hivemind` and `scoop-hivemind`, with **Contents:
-Read and write** permission. Suggest no expiration shorter than the
-project's realistic release cadence (e.g. 1 year), since a silently
-expired token turns into a broken release pipeline.
+`https://github.com/organizations/causewayai/settings/apps/new` and:
+- Name it something like `causeway-release-bot`.
+- Homepage URL: `https://github.com/causewayai/hivemind` (not
+  functionally important, just required).
+- Under **Webhook**, uncheck "Active" — this app doesn't need one.
+- Under **Repository permissions**, set **Contents: Read and write**
+  (this is the only permission needed).
+- Under "Where can this GitHub App be installed?", choose **Only on this
+  account**.
+- Click **Create GitHub App**, then on the app's settings page, click
+  **Generate a private key** — this downloads a `.pem` file. Note the
+  **App ID** shown near the top of the same page.
+- Go to the app's **Install App** tab, install it on the `causewayai`
+  org, choosing **Only select repositories**: `homebrew-causewayai` and
+  `scoop-causewayai` (not `hivemind` itself — the App only needs to push
+  to the tap/bucket repos; the workflow's default `GITHUB_TOKEN` already
+  has write access to `hivemind` for creating the release).
 
-**Step 2: Add it as a secret on the main repo**
+**Step 2: Give the user a script to set the secrets themselves — never
+ask them to paste the App ID or key contents into chat**
 
-Once the user gives you the token value (or pastes it directly into a
-`gh secret set` prompt so it never appears in chat/history):
+Even though only the private key is truly sensitive, route both through
+a script the user runs in their own terminal, so neither value ever
+enters the conversation. Per user preference, this script is *not*
+committed to `causewayai/hivemind` — it's a copy-paste snippet here
+rather than a repo file, since general setup/infra tooling like this is
+planned to live in a separate infra repo (not yet created). If that repo
+exists by the time this task runs, put the script there instead and
+reference it by path/URL here rather than inlining it.
 
 ```bash
-gh secret set HOMEBREW_TAP_TOKEN --repo causewayai/hivemind
-```//paste the token at the prompt
+read -rp "App ID: " APP_ID
+echo -n "$APP_ID" | gh secret set RELEASE_APP_ID --repo causewayai/hivemind
 
-**Step 3: Verify the secret is set (not its value)**
+read -rp "Path to downloaded .pem file: " PEM_PATH
+gh secret set RELEASE_APP_PRIVATE_KEY --repo causewayai/hivemind < "$PEM_PATH"
+
+gh secret list --repo causewayai/hivemind
+```
+
+Have them run it (in their own terminal, or via `!` in a Claude Code
+session) and confirm back once both secrets show up — don't run this on
+their behalf with values they've handed you, and don't ask them to paste
+the App ID or key into chat "just to relay it into a command."
+
+**Step 3: Verify both secrets are set (not their values)**
 
 ```bash
 gh secret list --repo causewayai/hivemind
 ```
-Expected: `HOMEBREW_TAP_TOKEN` appears in the list.
+Expected: both `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` appear.
 
 ---
 
@@ -414,11 +456,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             goos: darwin
             goarch: arm64
             archive: tar.gz
-          - os: macos-13
+          - os: macos-15-intel
             goos: darwin
             goarch: amd64
             archive: tar.gz
@@ -442,11 +484,22 @@ jobs:
         if: runner.os == 'Windows'
         run: echo "C:\Strawberry\c\bin" >> $env:GITHUB_PATH
 
+      - name: Pre-fetch modules (so CGO_CFLAGS path resolution has something to resolve)
+        run: go mod download
+        shell: bash
+
       - name: Build
         shell: bash
         env:
           CGO_ENABLED: 1
         run: |
+          # Same fix as ci.yml/Makefile (see docs/DESIGN.md, "Windows CI
+          # cgo toolchain"): sqlite-vec-go-bindings needs sqlite3ext.h,
+          # which only mattn/go-sqlite3 vendors. This workflow calls `go
+          # build` directly rather than through `make build`, so it needs
+          # the same CGO_CFLAGS fix applied inline rather than inheriting
+          # it from the Makefile.
+          export CGO_CFLAGS="-I$(go list -m -f '{{.Dir}}' github.com/mattn/go-sqlite3 | tr '\\' '/')"
           VERSION="${GITHUB_REF_NAME#v}"
           COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -501,6 +554,15 @@ git commit -m "ci: add per-OS release build/archive jobs"
     steps:
       - uses: actions/checkout@v4
 
+      - name: Mint a scoped tap/bucket access token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: causewayai
+          repositories: homebrew-causewayai,scoop-causewayai
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -528,10 +590,10 @@ git commit -m "ci: add per-OS release build/archive jobs"
 
       - name: Update Homebrew tap
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/homebrew-hivemind.git" tap
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/homebrew-causewayai.git" tap
           cat > tap/Formula/hivemindd.rb <<EOF
           class Hivemindd < Formula
             desc "Local persistent memory daemon for AI harnesses (MCP over HTTP)"
@@ -551,8 +613,10 @@ git commit -m "ci: add per-OS release build/archive jobs"
             end
 
             on_linux do
-              url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_linux_amd64.tar.gz"
-              sha256 "${LINUX_AMD64_SHA}"
+              on_intel do
+                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_linux_amd64.tar.gz"
+                sha256 "${LINUX_AMD64_SHA}"
+              end
             end
 
             def install
@@ -573,7 +637,7 @@ git commit -m "ci: add per-OS release build/archive jobs"
           end
           EOF
           cd tap
-          git config user.name "hivemind-release-bot"
+          git config user.name "causeway-release-bot"
           git config user.email "actions@github.com"
           git add Formula/hivemindd.rb
           git commit -m "hivemindd ${VERSION}"
@@ -581,10 +645,10 @@ git commit -m "ci: add per-OS release build/archive jobs"
 
       - name: Update Scoop bucket
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/scoop-hivemind.git" bucket
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/scoop-causewayai.git" bucket
           cat > bucket/bucket/hivemindd.json <<EOF
           {
             "version": "${VERSION}",
@@ -604,17 +668,20 @@ git commit -m "ci: add per-OS release build/archive jobs"
           }
           EOF
           cd bucket
-          git config user.name "hivemind-release-bot"
+          git config user.name "causeway-release-bot"
           git config user.email "actions@github.com"
           git add bucket/hivemindd.json
           git commit -m "hivemindd ${VERSION}"
           git push
 ```
 
-Note the reused secret name: `HOMEBREW_TAP_TOKEN` grants write access to
-*both* `homebrew-hivemind` and `scoop-hivemind` (Task 4 scoped the PAT to
-both repos), so the Scoop step reuses it rather than needing a second
-secret.
+Note the single minted token: `steps.app-token.outputs.token` is scoped
+by the earlier `create-github-app-token` step to *both*
+`homebrew-causewayai` and `scoop-causewayai` (Task 4's App installation
+covers both repos), so the Scoop step reuses the same short-lived token
+rather than minting a second one. The token is only valid for the
+lifetime of this job (~1 hour) and is scoped to exactly these two repos —
+it has no access to `hivemind` itself or anything else in the org.
 
 **Step 2: Commit**
 
@@ -670,21 +737,21 @@ present.
 **Step 4: Verify the Homebrew formula updated**
 
 ```bash
-gh api repos/causewayai/homebrew-hivemind/contents/Formula/hivemindd.rb --jq '.content' | base64 -d | grep version
+gh api repos/causewayai/homebrew-causewayai/contents/Formula/hivemindd.rb --jq '.content' | base64 -d | grep version
 ```
 Expected: `version "0.0.1-test"`
 
 **Step 5: Verify the Scoop manifest updated**
 
 ```bash
-gh api repos/causewayai/scoop-hivemind/contents/bucket/hivemindd.json --jq '.content' | base64 -d | jq .version
+gh api repos/causewayai/scoop-causewayai/contents/bucket/hivemindd.json --jq '.content' | base64 -d | jq .version
 ```
 Expected: `"0.0.1-test"`
 
 **Step 6: Do a real local install test on this machine (macOS)**
 
 ```bash
-brew tap causewayai/hivemind
+brew tap causewayai/causewayai
 brew install hivemindd
 hivemindd --version
 brew services start hivemindd
@@ -745,7 +812,7 @@ Add that line to your shell profile so it persists across sessions.
 ### macOS / Linux (Homebrew)
 
 ```bash
-brew tap causewayai/hivemind
+brew tap causewayai/causewayai
 brew install hivemindd
 brew services start hivemindd   # runs hivemindd in the background at login
 ```
@@ -756,7 +823,7 @@ Check it's running: `brew services list`. Stop it with
 ### Windows (Scoop)
 
 ```powershell
-scoop bucket add hivemind https://github.com/causewayai/scoop-hivemind
+scoop bucket add hivemind https://github.com/causewayai/scoop-causewayai
 scoop install hivemindd
 ```
 

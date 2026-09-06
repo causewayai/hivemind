@@ -45,9 +45,12 @@ now — add later on demand.
 ## CI (pull request / push to `main`)
 
 - **Trigger:** every PR and every push to `main`.
-- **Matrix:** `macos-latest` (arm64), `macos-13` (amd64), `ubuntu-latest`
+- **Matrix:** `macos-15` (arm64), `macos-15-intel` (amd64), `ubuntu-latest`
   (amd64), `windows-latest` (amd64) — same 4 legs as the release matrix, so
   a platform-specific cgo break surfaces before merge, not at tag time.
+  (`macos-13` was fully retired by GitHub in December 2025 and `macos-14`
+  is itself mid-deprecation as of this writing, retiring November 2026 —
+  `macos-15`/`macos-15-intel` are the current stable labels.)
 - **Per-leg steps:** checkout → set up Go 1.25 → ensure a C compiler is
   present (Xcode Command Line Tools on macOS, `gcc` on Linux, a
   mingw-w64/GCC toolchain on Windows — cgo here needs real GCC, not MSVC)
@@ -84,17 +87,18 @@ now — add later on demand.
   each archive's sha256 from `checksums.txt`, renders the Homebrew formula
   and Scoop manifest from a template (simple string substitution — no
   templating library needed), and pushes the result as a commit to
-  `causewayai/homebrew-hivemind` / `causewayai/scoop-hivemind` using a
-  cross-repo PAT.
+  `causewayai/homebrew-causewayai` / `causewayai/scoop-causewayai`,
+  authenticating via a short-lived GitHub App installation token minted
+  in-workflow (see Access, below) rather than a static PAT.
 
 ---
 
 ## Homebrew tap (macOS + Linux)
 
-- **Repo:** `causewayai/homebrew-hivemind` (the `homebrew-` prefix is
+- **Repo:** `causewayai/homebrew-causewayai` (the `homebrew-` prefix is
   required by Homebrew's tap-discovery convention), private.
-- **Formula:** `Formula/hivemindd.rb`, regenerated and pushed by GoReleaser
-  on every release.
+- **Formula:** `Formula/hivemindd.rb`, regenerated and pushed by the
+  release workflow's publish job on every release.
 - **Service management:** the formula declares a `service do ... end`
   block (launchd `RunAtLoad`/`KeepAlive` on macOS; Homebrew-on-Linux maps
   the same block onto its systemd-backed service runner), so
@@ -102,15 +106,15 @@ now — add later on demand.
   platforms — no manual foregrounding or hand-rolled launchd plist needed.
 - **Install flow:**
   ```
-  brew tap causewayai/hivemind
+  brew tap causewayai/causewayai
   brew install hivemindd
   brew services start hivemindd
   ```
 
 ## Scoop bucket (Windows)
 
-- **Repo:** `causewayai/scoop-hivemind`, private. GoReleaser pushes an
-  updated manifest JSON on every release.
+- **Repo:** `causewayai/scoop-causewayai`, private. The release workflow's
+  publish job pushes an updated manifest JSON on every release.
 - **Install flow:** `scoop bucket add hivemind ... && scoop install hivemindd`.
 - **Service management:** out of scope. Scoop has no `brew services`
   equivalent; Windows users run the installed binary directly or wire up
@@ -126,10 +130,15 @@ now — add later on demand.
   tap/bucket repo and the private release assets. Document this as a
   one-time setup step in the README; it's the deliberate friction traded
   for keeping the source private.
-- **CI:** the release workflow needs a token with write access to both
-  `homebrew-hivemind` and `scoop-hivemind` — the default per-run
-  `GITHUB_TOKEN` can't push to other repos — stored as a repo secret
-  (`HOMEBREW_TAP_TOKEN`) in `causewayai/hivemind`.
+- **CI:** the release workflow needs write access to both
+  `homebrew-causewayai` and `scoop-causewayai` — the default per-run
+  `GITHUB_TOKEN` can't push to other repos. Rather than a static PAT
+  secret, a dedicated GitHub App (`causeway-release-bot`) is installed on
+  just those two repos with Contents: Read and write; the workflow mints
+  a short-lived (~1hr) installation access token in-job via
+  `actions/create-github-app-token`, using two repo secrets in
+  `causewayai/hivemind` (`RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`)
+  that hold the App's identity, not a bearer credential by themselves.
 
 ---
 
