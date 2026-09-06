@@ -402,7 +402,12 @@ ask them to paste the App ID or key contents into chat**
 
 Even though only the private key is truly sensitive, route both through
 a script the user runs in their own terminal, so neither value ever
-enters the conversation:
+enters the conversation. Per user preference, this script is *not*
+committed to `causewayai/hivemind` — it's a copy-paste snippet here
+rather than a repo file, since general setup/infra tooling like this is
+planned to live in a separate infra repo (not yet created). If that repo
+exists by the time this task runs, put the script there instead and
+reference it by path/URL here rather than inlining it.
 
 ```bash
 read -rp "App ID: " APP_ID
