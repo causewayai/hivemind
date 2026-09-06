@@ -123,13 +123,22 @@ now — add later on demand.
 
 ## Access (private repos throughout)
 
-- **End users:** need a GitHub PAT with `repo` scope set as
-  `HOMEBREW_GITHUB_API_TOKEN` (Homebrew) — Scoop reads the same kind of PAT
-  via its own git-credential configuration for a private bucket — so that
-  tap/bucket add, install, and upgrade can authenticate against the private
-  tap/bucket repo and the private release assets. Document this as a
-  one-time setup step in the README; it's the deliberate friction traded
-  for keeping the source private.
+- **End users:** need a GitHub PAT with `repo` scope, set two different
+  ways depending on tool — `HOMEBREW_GITHUB_API_TOKEN` env var for
+  Homebrew; `scoop config gh_token <token>` (a Scoop-specific config
+  setting, not an env var or git-credential) for Scoop. (Earlier text
+  here assumed Scoop reused a git-credential mechanism like Homebrew's —
+  wrong; verified by reading `ScoopInstaller/Scoop`'s own
+  `lib/download.ps1` source, see docs/DESIGN.md.) Both are needed so
+  tap/bucket add, install, and upgrade can authenticate against the
+  private tap/bucket repo and the private release assets — Homebrew
+  additionally needs its formula to reference release assets by numeric
+  ID with an explicit `Authorization` header rather than the plain
+  `releases/download/...` path, since that path 404s unauthenticated and
+  doesn't accept a bearer token at all (see docs/DESIGN.md, "Homebrew
+  can't download release assets from a private repo without extra
+  help"). Document both as one-time setup steps in the README; this is
+  the deliberate friction traded for keeping the source private.
 - **CI:** the release workflow needs write access to both
   `homebrew-causewayai` and `scoop-causewayai` — the default per-run
   `GITHUB_TOKEN` can't push to other repos. Rather than a static PAT

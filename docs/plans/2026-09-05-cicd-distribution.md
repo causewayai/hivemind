@@ -287,6 +287,14 @@ class Hivemindd < Formula
   version "0.0.0"
   license "UNLICENSED"
 
+  # NOTE: these placeholder url/sha256 values get fully overwritten by
+  # Task 6's release workflow on the first real release, at which point
+  # the url becomes an api.github.com/.../releases/assets/<id> URL with
+  # an Authorization header (see docs/DESIGN.md, "Homebrew can't
+  # download release assets from a private repo without extra help") —
+  # the plain releases/download URL shown here does NOT work against a
+  # private repo and is only acceptable because v0.0.0 never resolves
+  # to a real release anyway.
   on_macos do
     on_arm do
       url "https://github.com/causewayai/hivemind/releases/download/v0.0.0/hivemindd_darwin_arm64.tar.gz"
@@ -589,6 +597,15 @@ git commit -m "ci: add per-OS release build/archive jobs"
           echo "LINUX_AMD64_SHA=$(grep linux_amd64 checksums.txt | awk '{print $1}')" >> "$GITHUB_ENV"
           echo "WINDOWS_AMD64_SHA=$(grep windows_amd64 checksums.txt | awk '{print $1}')" >> "$GITHUB_ENV"
 
+      - name: Look up asset IDs (Homebrew needs numeric asset IDs to authenticate downloads from this private repo)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ASSETS_JSON=$(gh api "repos/causewayai/hivemind/releases/tags/${GITHUB_REF_NAME}" --jq '.assets')
+          echo "DARWIN_ARM64_ID=$(jq -r '.[] | select(.name=="hivemindd_darwin_arm64.tar.gz") | .id' <<<"$ASSETS_JSON")" >> "$GITHUB_ENV"
+          echo "DARWIN_AMD64_ID=$(jq -r '.[] | select(.name=="hivemindd_darwin_amd64.tar.gz") | .id' <<<"$ASSETS_JSON")" >> "$GITHUB_ENV"
+          echo "LINUX_AMD64_ID=$(jq -r '.[] | select(.name=="hivemindd_linux_amd64.tar.gz") | .id' <<<"$ASSETS_JSON")" >> "$GITHUB_ENV"
+
       - name: Update Homebrew tap
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -604,18 +621,21 @@ git commit -m "ci: add per-OS release build/archive jobs"
 
             on_macos do
               on_arm do
-                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_darwin_arm64.tar.gz"
+                url "https://api.github.com/repos/causewayai/hivemind/releases/assets/${DARWIN_ARM64_ID}",
+                    headers: ["Authorization: token #{ENV["HOMEBREW_GITHUB_API_TOKEN"]}", "Accept: application/octet-stream"]
                 sha256 "${DARWIN_ARM64_SHA}"
               end
               on_intel do
-                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_darwin_amd64.tar.gz"
+                url "https://api.github.com/repos/causewayai/hivemind/releases/assets/${DARWIN_AMD64_ID}",
+                    headers: ["Authorization: token #{ENV["HOMEBREW_GITHUB_API_TOKEN"]}", "Accept: application/octet-stream"]
                 sha256 "${DARWIN_AMD64_SHA}"
               end
             end
 
             on_linux do
               on_intel do
-                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_linux_amd64.tar.gz"
+                url "https://api.github.com/repos/causewayai/hivemind/releases/assets/${LINUX_AMD64_ID}",
+                    headers: ["Authorization: token #{ENV["HOMEBREW_GITHUB_API_TOKEN"]}", "Accept: application/octet-stream"]
                 sha256 "${LINUX_AMD64_SHA}"
               end
             end

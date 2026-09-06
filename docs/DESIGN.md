@@ -93,3 +93,24 @@ With both fixed, `windows-latest` needed no MSYS2/mingw-w64 fallback — the Str
 The next issue hit on the same real-tag-push test (after the `zip` fix above): `gh release create` failed with `HTTP 403: Resource not accessible by integration`. The default per-run `GITHUB_TOKEN` only carries `contents: read` (a repo/org security default, restricting the automatic token to the minimum unless a workflow opts into more), so creating a release — a write operation — was rejected.
 
 **Fix:** add an explicit `permissions: contents: write` block scoped to just the `publish` job (not the whole workflow, since `build` doesn't need elevated permissions — it only checks out the repo). This is unrelated to the GitHub App token used for the Homebrew/Scoop pushes — that's a separate, narrower-scoped credential for two external repos; this permission only affects the default token's access to `causewayai/hivemind` itself.
+
+---
+
+## Homebrew can't download release *assets* from a private repo without extra help
+
+With the `zip` and `contents:write` fixes above, the pipeline finally produced a real release and pushed a real formula — but `brew install hivemindd` itself then failed: `curl: (56) The requested URL returned error: 404` trying to fetch `github.com/causewayai/hivemind/releases/download/<tag>/<file>`.
+
+The root cause: `HOMEBREW_GITHUB_API_TOKEN` (set by the end user per the README) authenticates Homebrew's own API calls (tap operations, `brew audit`, etc.) but is **not** automatically attached to a formula's `url` download request. The plain `github.com/.../releases/download/...` path is a browser-session-authenticated redirector — it doesn't accept a bearer token at all (confirmed directly: `curl -H "Authorization: token $TOKEN" .../releases/download/...` still 404s). Homebrew used to ship a built-in `GitHubPrivateRepositoryReleaseDownloadStrategy` for exactly this case, but it was removed from Homebrew core; there's no drop-in replacement class anymore.
+
+**Fix, verified end-to-end with a real `brew install` locally:** point the formula's `url` at the numeric-asset-ID API endpoint instead of the plain path, with an explicit header:
+
+```ruby
+url "https://api.github.com/repos/causewayai/hivemind/releases/assets/<ASSET_ID>",
+    headers: ["Authorization: token #{ENV["HOMEBREW_GITHUB_API_TOKEN"]}", "Accept: application/octet-stream"]
+```
+
+This works with Homebrew's *standard* `CurlDownloadStrategy` — no custom download-strategy class needed — because `url ..., headers: [...]` is a first-class option it already supports, and `api.github.com/repos/.../releases/assets/<id>` correctly 302-redirects to a signed, unauthenticated CDN URL once the initial request is authenticated (verified directly with `curl`). `CurlDownloadStrategy` deliberately strips the `Authorization` header before following a redirect, which is exactly the safe behavior wanted here — the token must never reach the redirected `release-assets.githubusercontent.com` URL, only the initial `api.github.com` request.
+
+The asset ID is only known *after* `gh release create` runs (it's assigned per-release, not derivable from the tag/filename alone), so `release.yml`'s publish job looks it up via `gh api repos/causewayai/hivemind/releases/tags/$TAG` and templates the numeric ID into the formula alongside the version and sha256.
+
+**Scoop needed no equivalent fix.** Reading `ScoopInstaller/Scoop`'s own `lib/download.ps1` source (not just its docs, which don't cover this) shows it already special-cases the exact `github.com/<owner>/<repo>/releases/download/<tag>/<file>` URL shape: if a token is configured (`scoop config gh_token <token>`, or `$env:SCOOP_GH_TOKEN`), it transparently rewrites the request through the same authenticated `api.github.com` asset-lookup flow Homebrew now does explicitly. So the Scoop manifest's URL stays exactly as originally templated — the earlier assumption in the design doc's Access section that Scoop "reads the same kind of PAT via its own git-credential configuration" was wrong; it's this separate `gh_token` config setting, not a git credential. **Not verified on an actual Windows machine** (none available in this dev loop) — verified only by reading Scoop's source directly. Flag this as the one remaining unverified assumption if Scoop install issues ever come up.
