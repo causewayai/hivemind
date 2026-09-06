@@ -550,6 +550,8 @@ git commit -m "ci: add per-OS release build/archive jobs"
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
