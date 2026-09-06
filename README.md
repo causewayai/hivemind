@@ -19,7 +19,57 @@ questions, see [`docs/DESIGN.md`](docs/DESIGN.md).
 - A C compiler (the SQLite and vector-search dependencies use cgo — on
   macOS, the Xcode Command Line Tools; on Linux, `gcc` or `clang`)
 
-## Install / Build
+## Install
+
+`hivemindd` is distributed via a Homebrew tap (macOS + Linux) and a Scoop
+bucket (Windows). The `hivemind` source repo and its releases are public, but
+the tap/bucket repos (`causewayai/homebrew-causewayai`,
+`causewayai/scoop-causewayai`) are still private for now — each hosts
+formulas/manifests for more than just this project, and going public is
+tracked as a near-term follow-up. Until then, both package managers need a
+one-time credential to access the tap/bucket itself (not to download
+`hivemindd`'s binary, which is already public).
+
+### macOS / Linux (Homebrew)
+
+One-time setup — set a GitHub personal access token so `brew` can read the
+private tap (ask a maintainer for `causewayai` org access):
+
+```bash
+export HOMEBREW_GITHUB_API_TOKEN=<your PAT with read access to causewayai>
+```
+
+Add that line to your shell profile so it persists across sessions. Then:
+
+```bash
+brew tap causewayai/causewayai
+brew install hivemindd
+brew services start hivemindd   # runs hivemindd in the background at login
+```
+
+Check it's running: `brew services list`. Stop it with
+`brew services stop hivemindd`.
+
+### Windows (Scoop)
+
+One-time setup — Scoop uses its own config setting for GitHub auth, not an
+environment variable:
+
+```powershell
+scoop config gh_token <your PAT with read access to causewayai>
+```
+
+Then:
+
+```powershell
+scoop bucket add causewayai https://github.com/causewayai/scoop-causewayai
+scoop install hivemindd
+```
+
+Scoop doesn't manage background services — run `hivemindd` directly, or wire
+it into Task Scheduler yourself.
+
+### Build from source
 
 ```bash
 git clone https://github.com/causewayai/hivemind.git
