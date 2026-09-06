@@ -514,9 +514,8 @@ jobs:
 
       - name: Archive (zip)
         if: matrix.archive == 'zip'
-        shell: bash
-        run: |
-          zip "hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.zip" hivemindd.exe
+        shell: pwsh
+        run: Compress-Archive -Path hivemindd.exe -DestinationPath "hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:

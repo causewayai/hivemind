@@ -77,3 +77,11 @@ The CI/CD plan (`docs/plans/2026-09-05-cicd-distribution.md`, Task 2) flagged th
 **Failure 2 — gofmt flags every file as unformatted, once cgo actually started compiling.** `windows-latest`'s Git checkout was converting files to CRLF on checkout, and `gofmt` (run via `golangci-lint`) treats CRLF as "not properly formatted" regardless of the content's actual formatting. Fixed with a repo-root `.gitattributes` (`* text=auto eol=lf`), which normalizes line endings to LF on checkout on every platform — not just a CI workaround, since a contributor's own Windows git config (`core.autocrlf=true` is a common default) would otherwise hit the same thing locally.
 
 With both fixed, `windows-latest` needed no MSYS2/mingw-w64 fallback — the Strawberry Perl-bundled GCC that ships on the GitHub-hosted Windows runner image (added to `PATH` via the `Configure MinGW GCC` step) was sufficient once the include path and line-ending issues were resolved.
+
+---
+
+## `zip` isn't installed on windows-latest
+
+`.github/workflows/release.yml`'s Windows leg archives the built binary with `zip` for consistency with the `.tar.gz` archiving used on macOS/Linux. That command doesn't exist on the GitHub-hosted `windows-latest` runner image — it's not preinstalled the way it is on the Ubuntu/macOS images — and failed with `zip: command not found` (exit 127) the first time a real release tag was pushed, since this failure mode only shows up on `push: tags`, not on the regular `pull_request`/`push: main` CI workflow, which never runs `release.yml` at all.
+
+**Fix:** use PowerShell's built-in `Compress-Archive` cmdlet instead (`shell: pwsh`, available by default on every Windows runner, no install needed) rather than trying to install `zip` via Chocolatey. Produces an equivalent `.zip` for the Scoop manifest.
