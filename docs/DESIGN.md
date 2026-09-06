@@ -85,3 +85,11 @@ With both fixed, `windows-latest` needed no MSYS2/mingw-w64 fallback — the Str
 `.github/workflows/release.yml`'s Windows leg archives the built binary with `zip` for consistency with the `.tar.gz` archiving used on macOS/Linux. That command doesn't exist on the GitHub-hosted `windows-latest` runner image — it's not preinstalled the way it is on the Ubuntu/macOS images — and failed with `zip: command not found` (exit 127) the first time a real release tag was pushed, since this failure mode only shows up on `push: tags`, not on the regular `pull_request`/`push: main` CI workflow, which never runs `release.yml` at all.
 
 **Fix:** use PowerShell's built-in `Compress-Archive` cmdlet instead (`shell: pwsh`, available by default on every Windows runner, no install needed) rather than trying to install `zip` via Chocolatey. Produces an equivalent `.zip` for the Scoop manifest.
+
+---
+
+## `publish` job's GITHUB_TOKEN needs explicit `contents: write`
+
+The next issue hit on the same real-tag-push test (after the `zip` fix above): `gh release create` failed with `HTTP 403: Resource not accessible by integration`. The default per-run `GITHUB_TOKEN` only carries `contents: read` (a repo/org security default, restricting the automatic token to the minimum unless a workflow opts into more), so creating a release — a write operation — was rejected.
+
+**Fix:** add an explicit `permissions: contents: write` block scoped to just the `publish` job (not the whole workflow, since `build` doesn't need elevated permissions — it only checks out the repo). This is unrelated to the GitHub App token used for the Homebrew/Scoop pushes — that's a separate, narrower-scoped credential for two external repos; this permission only affects the default token's access to `causewayai/hivemind` itself.
