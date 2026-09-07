@@ -322,10 +322,19 @@ struct layout) are left to the plan author's discretion.
 - **Hook distribution:** ships in this repo; installed by an idempotent
   `hivemind hook install` (with `--print` to emit the JSON for manual /
   other use); documented copy-paste is the fallback.
-- **Daemon local address:** Unix domain socket at `~/.hivemind/daemon.sock`
-  on macOS/Linux (filesystem perms as access control); a loopback TCP
-  port persisted to `~/.hivemind/daemon.port` on Windows. Both sit behind
-  a single "dial the daemon" helper.
+- **Daemon local address:** the daemon keeps its existing loopback TCP
+  HTTP listener (harnesses already connect to it, and the port can vary
+  via `HIVEMIND_PORT`) and, on startup, writes the port it actually bound
+  to `~/.hivemind/daemon.port` (plus its PID to `~/.hivemind/daemon.pid`).
+  The `hivemind` CLI reads that file and dials the same
+  `127.0.0.1:<port>` MCP endpoint, behind a single "dial the daemon"
+  helper. **This supersedes the review's Unix-domain-socket choice:** a
+  socket would have meant replacing or duplicating the transport
+  harnesses already use — out of scope for this POC — and its "filesystem
+  perms as access control" benefit is moot while unauthenticated loopback
+  TCP is already the accepted Local Edition model. A socket can be
+  revisited later without touching the CLI (the dial helper is the only
+  thing that would move).
 - **Spawn-race:** both guards — the CLI takes a `flock` on
   `~/.hivemind/daemon.lock` before spawning, and `hivemindd` binds its
   address with fail-if-exists semantics as a backstop so a stray second
