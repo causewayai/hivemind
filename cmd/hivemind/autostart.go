@@ -23,6 +23,12 @@ func ensureDaemon(ctx context.Context) (*mcp.ClientSession, error) {
 		return sess, nil
 	}
 
+	// The daemon creates the runtime dir itself, but we need it now for the
+	// lock file — before any daemon exists.
+	if err := os.MkdirAll(runtimeDir(), 0o755); err != nil {
+		return nil, fmt.Errorf("runtime dir: %w", err)
+	}
+
 	unlock, err := acquireLock(lockFilePath())
 	if err != nil {
 		return nil, fmt.Errorf("daemon lock: %w", err)
