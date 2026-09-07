@@ -9,7 +9,9 @@ func TestRewriteGHLogCommand(t *testing.T) {
 		matched bool
 	}{
 		{`gh run view 42 --log -R o/r`, `hivemind ci-logs run view 42 --log -R o/r`, true},
-		{`gh run view --log-failed 42`, `hivemind ci-logs run view --log-failed 42`, true},
+		{`gh run view 99 --log`, `hivemind ci-logs run view 99 --log`, true},
+		{`gh run view --log 99`, ``, false},
+		{`gh run view --log-failed 42`, ``, false},
 		{`gh run view 42 --json conclusion`, ``, false},
 		{`gh run list`, ``, false},
 		{`gh pr view 3`, ``, false},
