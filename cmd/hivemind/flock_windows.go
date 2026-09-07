@@ -10,6 +10,11 @@ import (
 
 func daemonExeName() string { return "hivemindd.exe" }
 
+// daemonStopIsGraceful is false on Windows: signalTerm is a force Kill (no
+// SIGTERM), so the daemon never runs its cleanup and stopDaemon must remove the
+// stale runtime files itself.
+const daemonStopIsGraceful = false
+
 func signalTerm(p *os.Process) error { return p.Kill() } // no SIGTERM on Windows
 
 func detachAttrs() *syscall.SysProcAttr {

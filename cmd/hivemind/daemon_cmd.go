@@ -62,8 +62,13 @@ func stopDaemon() int {
 		fmt.Fprintf(os.Stderr, "hivemind: signalling hivemindd: %v\n", err)
 		return 1
 	}
+	if !daemonStopIsGraceful {
+		// Force-killed: the daemon can't clean up its own runtime files.
+		_ = os.Remove(portFilePath())
+		_ = os.Remove(pidFilePath())
+	}
 	for i := 0; i < 50; i++ {
-		if _, err := os.Stat(portFilePath()); os.IsNotExist(err) {
+		if daemonStopped() {
 			fmt.Println("stopped")
 			return 0
 		}
@@ -71,4 +76,12 @@ func stopDaemon() int {
 	}
 	fmt.Fprintln(os.Stderr, "hivemind: hivemindd did not stop within 5s")
 	return 1
+}
+
+// daemonStopped reports that hivemindd has released its runtime state: its
+// signal handler (or stopDaemon's own cleanup on Windows) has removed
+// daemon.port.
+func daemonStopped() bool {
+	_, err := os.Stat(portFilePath())
+	return os.IsNotExist(err)
 }

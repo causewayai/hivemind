@@ -9,6 +9,11 @@ import (
 
 func daemonExeName() string { return "hivemindd" }
 
+// daemonStopIsGraceful reports whether signalTerm lets hivemindd shut down and
+// remove its own runtime files. On unix it is a SIGTERM, so the daemon's signal
+// handler clears daemon.port / daemon.pid itself.
+const daemonStopIsGraceful = true
+
 func signalTerm(p *os.Process) error { return p.Signal(syscall.SIGTERM) }
 
 func detachAttrs() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setsid: true} }
