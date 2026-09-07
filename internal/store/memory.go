@@ -1,6 +1,9 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,9 +29,13 @@ type CreateMemoryInput struct {
 	Scope      string // "session" or "user"
 	SessionID  string // required when Scope == "session"
 	Source     string
-	SourceType string // "harness" (this plan does not build the "etl" path)
+	SourceType string // "harness" or "etl"
 	Tags       []string
 	Embedding  []float32
+	// ExternalID, when non-empty, makes the write an idempotent upsert keyed on
+	// (Source, ExternalID, Scope): if a row already exists it is returned
+	// unchanged and no tags/embedding are written. Empty means a plain insert.
+	ExternalID string
 }
 
 // CreateMemory inserts a new memory entry, its tags, and (if provided) its
@@ -42,6 +49,7 @@ func (s *Store) CreateMemory(in CreateMemoryInput) (*MemoryEntry, error) {
 		SessionID:  in.SessionID,
 		Source:     in.Source,
 		SourceType: in.SourceType,
+		ExternalID: in.ExternalID,
 		Tags:       in.Tags,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -54,18 +62,53 @@ func (s *Store) CreateMemory(in CreateMemoryInput) (*MemoryEntry, error) {
 	// A no-op after a successful Commit (returns sql.ErrTxDone, safe to ignore).
 	defer func() { _ = tx.Rollback() }()
 
-	res, err := tx.Exec(
-		`INSERT INTO memory_entries (id, content, scope, session_id, source, source_type, external_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		entry.ID, entry.Content, entry.Scope, nullable(entry.SessionID), entry.Source, entry.SourceType,
-		nil, entry.CreatedAt.Format(time.RFC3339), entry.UpdatedAt.Format(time.RFC3339),
-	)
-	if err != nil {
-		return nil, err
-	}
-	rowID, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
+	var rowID int64
+	if in.ExternalID == "" {
+		res, err := tx.Exec(
+			`INSERT INTO memory_entries (id, content, scope, session_id, source, source_type, external_id, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			entry.ID, entry.Content, entry.Scope, nullable(entry.SessionID), entry.Source, entry.SourceType,
+			nil, entry.CreatedAt.Format(time.RFC3339), entry.UpdatedAt.Format(time.RFC3339),
+		)
+		if err != nil {
+			return nil, err
+		}
+		if rowID, err = res.LastInsertId(); err != nil {
+			return nil, err
+		}
+	} else {
+		res, err := tx.Exec(
+			`INSERT INTO memory_entries (id, content, scope, session_id, source, source_type, external_id, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(source, external_id, scope) WHERE external_id IS NOT NULL DO NOTHING`,
+			entry.ID, entry.Content, entry.Scope, nullable(entry.SessionID), entry.Source, entry.SourceType,
+			entry.ExternalID, entry.CreatedAt.Format(time.RFC3339), entry.UpdatedAt.Format(time.RFC3339),
+		)
+		if err != nil {
+			return nil, err
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected == 0 {
+			// Row already existed — commit the (empty) tx and return the existing entry.
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			existing, err := s.GetMemoryByExternalID(entry.Source, entry.ExternalID, entry.Scope)
+			if err != nil {
+				return nil, err
+			}
+			if existing == nil {
+				return nil, fmt.Errorf("upsert on (%s, %s, %s) hit a conflict but the row is gone",
+					entry.Source, entry.ExternalID, entry.Scope)
+			}
+			return existing, nil
+		}
+		if rowID, err = res.LastInsertId(); err != nil {
+			return nil, err
+		}
 	}
 
 	for _, tag := range in.Tags {
@@ -115,6 +158,23 @@ func (s *Store) GetMemory(id string) (*MemoryEntry, error) {
 		entry.Tags = append(entry.Tags, tag)
 	}
 	return entry, rows.Err()
+}
+
+// GetMemoryByExternalID fetches the single entry matching the composite ETL
+// key, or (nil, nil) if there is no match.
+func (s *Store) GetMemoryByExternalID(source, externalID, scope string) (*MemoryEntry, error) {
+	var id string
+	err := s.db.QueryRow(
+		`SELECT id FROM memory_entries WHERE source = ? AND external_id = ? AND scope = ?`,
+		source, externalID, scope,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetMemory(id)
 }
 
 // ListFilter narrows ListMemories to entries matching all given criteria;
