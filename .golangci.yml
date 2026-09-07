@@ -70,6 +70,21 @@ linters:
             - pkg: github.com/causewayai/hivemind/cmd
               desc: "internal packages must not depend on cmd/hivemindd, the composition root"
 
+        # Client CLI: talks to the daemon over HTTP/MCP and must stay
+        # cgo-free (make build compiles it with CGO_ENABLED=1, so a stray
+        # import would not fail the build).
+        hivemind-cli:
+          files:
+            - "**/cmd/hivemind/**"
+            - "!**/*_test.go"
+          deny:
+            - pkg: github.com/causewayai/hivemind/internal/store
+              desc: "the hivemind client CLI must stay cgo-free: no internal/store (sqlite-vec cgo)"
+            - pkg: github.com/causewayai/hivemind/internal/cilog/retention
+              desc: "internal/cilog/retention pulls in internal/store; the CLI must not link it"
+            - pkg: github.com/causewayai/hivemind/internal/mcpserver
+              desc: "the CLI speaks MCP to the daemon over HTTP; it does not embed the server"
+
 formatters:
   enable:
     - gofmt

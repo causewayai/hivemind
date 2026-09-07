@@ -1,4 +1,7 @@
 /hivemindd
+/hivemindd.exe
+/hivemind
+/hivemind.exe
 *.db
 *.db-wal
 *.db-shm

@@ -25,6 +25,10 @@ CREATE TABLE IF NOT EXISTS memory_tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_memory_tags_tag ON memory_tags(tag);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_entries_source_extid_scope
+    ON memory_entries(source, external_id, scope)
+    WHERE external_id IS NOT NULL;
 `
 
 func vectorSchema(dim int) string {
