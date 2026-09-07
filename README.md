@@ -21,7 +21,9 @@ questions, see [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Install
 
-`hivemindd` is distributed via a Homebrew tap (macOS + Linux) and a Scoop
+Hivemind ships **two** binaries: `hivemindd` (the daemon) and `hivemind`
+(a client CLI — daemon management plus the [CI log cache](#ci-log-cache)).
+Both are distributed via a Homebrew tap (macOS + Linux) and a Scoop
 bucket (Windows). The `hivemind` source repo and its releases are public, but
 the tap/bucket repos (`causewayai/homebrew-causewayai`,
 `causewayai/scoop-causewayai`) are still private for now — each hosts
@@ -43,9 +45,15 @@ Add that line to your shell profile so it persists across sessions. Then:
 
 ```bash
 brew tap causewayai/causewayai
-brew install hivemindd
+brew install hivemind           # installs both hivemindd and hivemind
 brew services start hivemindd   # runs hivemindd in the background at login
 ```
+
+> Earlier releases used a formula named `hivemindd`; it's now `hivemind` and
+> carries both binaries. If you installed the old one:
+> `brew uninstall hivemindd && brew install causewayai/causewayai/hivemind`.
+> `hivemind` also starts `hivemindd` on demand, so `brew services` is
+> optional — use it only if you want the daemon running at login.
 
 Check it's running: `brew services list`. Stop it with
 `brew services stop hivemindd`.
@@ -63,11 +71,13 @@ Then:
 
 ```powershell
 scoop bucket add causewayai https://github.com/causewayai/scoop-causewayai
-scoop install hivemindd
+scoop install hivemind   # installs both hivemindd.exe and hivemind.exe
 ```
 
-Scoop doesn't manage background services — run `hivemindd` directly, or wire
-it into Task Scheduler yourself.
+(Earlier releases used a manifest named `hivemindd`; it's now `hivemind` and
+ships both binaries.) Scoop doesn't manage background services — run
+`hivemindd` directly, let `hivemind` start it on demand, or wire it into
+Task Scheduler yourself.
 
 ### Build from source
 
@@ -77,9 +87,9 @@ cd hivemind
 make build
 ```
 
-This produces a `hivemindd` binary in the repository root. There's no `go
-install` path yet since the binary isn't published to a module proxy-visible
-location — build from a local clone.
+This produces `hivemindd` and `hivemind` binaries in the repository root.
+There's no `go install` path yet since they aren't published to a module
+proxy-visible location — build from a local clone.
 
 ## Running the daemon
 
@@ -99,9 +109,13 @@ All configuration is via environment variables; there is no config file.
 
 | Variable | Default | Description |
 |---|---|---|
-| `HIVEMIND_PORT` | `8420` | TCP port to listen on (loopback only) |
-| `HIVEMIND_DATA_DIR` | `~/.hivemind/hivemind.db` | Path to the SQLite database file |
+| `HIVEMIND_PORT` | `8420` | TCP port to listen on (loopback only); `0` picks a free port |
+| `HIVEMIND_DATA_DIR` | `~/.hivemind/hivemind.db` | SQLite database file. Its parent directory also holds the daemon's `daemon.port` / `daemon.pid` files and the CI log cache |
 | `HIVEMIND_EMBEDDING_DIM` | `768` | Dimensionality of stored embeddings — see [Embeddings](#embeddings-current-limitation) |
+| `HIVEMIND_CI_LOG_DIR` | `<data dir>/ci-logs` | Where raw CI logs are cached on disk |
+| `HIVEMIND_CI_LOG_MAX_AGE` | `720h` | Cached logs older than this are pruned by the hourly cleanup |
+| `HIVEMIND_CI_LOG_MAX_SIZE` | `524288000` | Soft cap (bytes) on total CI log cache size; oldest pruned first |
+| `HIVEMIND_CI_LOG_CLEANUP` | (unset) | Set to `off` to disable the daemon's hourly CI-log cleanup |
 
 Example, running on a custom port with an isolated data file (useful for
 trying things out without touching your real data):
@@ -110,8 +124,8 @@ trying things out without touching your real data):
 HIVEMIND_PORT=9000 HIVEMIND_DATA_DIR=/tmp/hivemind-test.db ./hivemindd
 ```
 
-Stop the daemon with `Ctrl-C`, or `kill` its process — there's no separate
-stop command.
+Stop the daemon with `Ctrl-C`, `kill` its process, or `hivemind daemon stop`.
+`hivemind daemon status` reports whether one is running and on which port.
 
 ## Connecting a harness
 
@@ -140,20 +154,70 @@ curl -s -X POST http://127.0.0.1:8420/ \
 A healthy daemon responds with a JSON-RPC result containing `serverInfo` and
 `capabilities`.
 
+## CI log cache
+
+`hivemind ci-logs` caches GitHub Actions run/job logs locally so a harness
+that already fetched a run never re-hits the GitHub API for it — this
+session or a past one.
+
+```bash
+hivemind ci-logs run view <run-id> --log -R owner/repo
+```
+
+- **Cache hit** — prints the stored run summary and per-failed-job error
+  text; no network call.
+- **Cache miss** — runs the real `gh` (using your existing `gh auth`),
+  prints its output unchanged, saves the raw log under
+  `~/.hivemind/ci-logs/`, and records a run-summary entry plus one entry
+  per failed job. These are queryable via `memory_query` with
+  `external_id: "owner/repo#<run-id>"` and `source: "github-actions"`.
+
+The CLI starts `hivemindd` on demand — no `brew services` needed for this.
+Put the run id first: `run view <run-id> --log`, not `run view --log <run-id>`.
+
+### Claude Code integration
+
+```bash
+hivemind hook install
+```
+
+registers a `PreToolUse` hook that transparently rewrites
+`gh run view … --log` / `--log-failed` commands to `hivemind ci-logs …`
+before they run. `hivemind hook print` emits the settings snippet for
+manual installation. For other harnesses, see
+[`docs/ci-log-cache-rules.md`](docs/ci-log-cache-rules.md).
+
+### Managing the daemon
+
+```bash
+hivemind daemon status   # running? which port?
+hivemind daemon start    # start it (also happens automatically on first use)
+hivemind daemon stop     # stop a hivemind-started daemon
+```
+
+Retention (age/size caps, disabling the hourly cleanup) is configured with
+the `HIVEMIND_CI_LOG_*` variables in [Configuration](#configuration).
+
 ## Available tools
 
 ### `memory_write`
 
-Writes a new memory entry. Always scoped to the calling session — a harness
-cannot write directly to a broader scope (see [Scopes](#scopes-and-isolation)).
+Writes a new memory entry. By default it's scoped to the calling session —
+a harness cannot promote a memory to a broader scope after the fact (see
+[Scopes](#scopes-and-isolation)) — but the optional `scope` / `source_type` /
+`external_id` fields open the ETL upsert path used by, e.g., the
+[CI log cache](#ci-log-cache).
 
 | Field | Required | Description |
 |---|---|---|
-| `session_id` | yes | Your harness session's identifier |
+| `session_id` | yes | Your harness session's identifier (ignored when `scope` is `user`) |
 | `content` | yes | The freeform text to remember |
-| `source` | yes | An identifier for the harness/tool writing this (e.g. `"claude-code"`) |
+| `source` | yes | An identifier for the writer (harness name, or an ETL source like `"github-actions"`) |
 | `tags` | no | Labels for later filtering |
 | `embedding` | no | A precomputed embedding vector. If omitted, the daemon generates one itself (see [Embeddings](#embeddings-current-limitation)) |
+| `scope` | no | `"session"` (default) or `"user"` |
+| `source_type` | no | `"harness"` (default) or `"etl"` |
+| `external_id` | no | An external key (e.g. `"owner/repo#12345"`). When set, the write is an **idempotent upsert** on `(source, external_id, scope)` — re-writing the same key returns the existing entry's id and changes nothing else |
 
 Returns `{"id": "<uuid>"}`.
 
@@ -181,12 +245,18 @@ tag/source filters. Returns your own session's matching entries **and**
 matching `user`-scope entries shared across all local harnesses — never
 another session's entries (see [Scopes](#scopes-and-isolation)).
 
+**When `query` is omitted**, the daemon runs a purely structured lookup —
+no embedding, no semantic-distance cutoff — returning the entries that match
+`external_id` / `tags` / `source`, newest first. This is the "do I already
+have X cached?" path.
+
 | Field | Required | Description |
 |---|---|---|
 | `session_id` | yes | Your harness session's identifier |
-| `query` | no | Free text to search for |
+| `query` | no | Free text for semantic search; omit for an exact structured lookup |
 | `tags` | no | Only return entries with at least one of these tags |
 | `source` | no | Only return entries written by this source |
+| `external_id` | no | Exact match on the ETL key; only honored when `query` is omitted |
 | `top_k` | no | Max results to return (default 10) |
 
 Example call and response, following on from the `memory_write` example
