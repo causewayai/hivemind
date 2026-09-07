@@ -200,3 +200,26 @@ func TestGetMemoryByExternalID(t *testing.T) {
 		t.Fatalf("expected nil for no match, got %+v", miss)
 	}
 }
+
+func TestListMemories_FilterByExternalID(t *testing.T) {
+	s := openTestStore(t, 8)
+	mk := func(ext string) {
+		if _, err := s.CreateMemory(CreateMemoryInput{
+			Content: "x", Scope: "user", Source: "github-actions", SourceType: "etl",
+			ExternalID: ext, Embedding: make([]float32, 8),
+		}); err != nil {
+			t.Fatalf("CreateMemory(%s) error = %v", ext, err)
+		}
+	}
+	mk("o/r#1")
+	mk("o/r#2")
+	mk("o/r#2#99") // job-level entry for run 2
+
+	got, err := s.ListMemories(ListFilter{ExternalID: "o/r#2"})
+	if err != nil {
+		t.Fatalf("ListMemories() error = %v", err)
+	}
+	if len(got) != 1 || got[0].ExternalID != "o/r#2" {
+		t.Fatalf("ListMemories(ExternalID=o/r#2) = %+v, want exactly the run-2 summary", got)
+	}
+}
