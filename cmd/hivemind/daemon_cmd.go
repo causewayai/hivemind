@@ -17,7 +17,7 @@ func runDaemonCmd(args []string) int {
 	ctx := context.Background()
 	switch args[0] {
 	case "start":
-		sess, err := ensureDaemon(ctx)
+		sess, err := connectChecked(ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "hivemind: %v\n", err)
 			return 1
