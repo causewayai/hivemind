@@ -43,8 +43,9 @@ func TestMemoryWrite_DefaultsToSessionScope(t *testing.T) {
 	}
 }
 
-func openMCPTestStore(t *testing.T, dim int) *store.Store {
+func openMCPTestStore(t *testing.T) *store.Store {
 	t.Helper()
+	const dim = 8
 	s, err := store.Open(t.TempDir()+"/test.db", dim)
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
@@ -54,7 +55,7 @@ func openMCPTestStore(t *testing.T, dim int) *store.Store {
 }
 
 func TestMemoryWrite_ExplicitUserScopeEtlExternalID(t *testing.T) {
-	s := openMCPTestStore(t, 8)
+	s := openMCPTestStore(t)
 	srv := New(s, embedding.NewHashProvider(8))
 
 	out, err := srv.handleMemoryWrite(context.Background(), MemoryWriteInput{
@@ -71,7 +72,7 @@ func TestMemoryWrite_ExplicitUserScopeEtlExternalID(t *testing.T) {
 }
 
 func TestMemoryWrite_UpsertReturnsSameID(t *testing.T) {
-	s := openMCPTestStore(t, 8)
+	s := openMCPTestStore(t)
 	srv := New(s, embedding.NewHashProvider(8))
 	in := MemoryWriteInput{Content: "a", Source: "github-actions", Scope: "user", SourceType: "etl", ExternalID: "o/r#1"}
 
@@ -90,7 +91,7 @@ func TestMemoryWrite_UpsertReturnsSameID(t *testing.T) {
 }
 
 func TestMemoryWrite_RejectsInvalidScope(t *testing.T) {
-	s := openMCPTestStore(t, 8)
+	s := openMCPTestStore(t)
 	srv := New(s, embedding.NewHashProvider(8))
 	_, err := srv.handleMemoryWrite(context.Background(), MemoryWriteInput{
 		Content: "x", Source: "h", Scope: "team",
