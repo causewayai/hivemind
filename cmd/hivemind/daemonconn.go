@@ -26,6 +26,7 @@ func runtimeDir() string {
 }
 
 func portFilePath() string { return filepath.Join(runtimeDir(), "daemon.port") }
+func pidFilePath() string  { return filepath.Join(runtimeDir(), "daemon.pid") }
 
 // readDaemonPort returns the port hivemindd advertised, or an error if the
 // file is absent or unparsable.
