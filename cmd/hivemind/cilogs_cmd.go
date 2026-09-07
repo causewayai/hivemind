@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/causewayai/hivemind/internal/cilog"
@@ -152,13 +154,112 @@ func queryByExternalID(ctx context.Context, sess *mcp.ClientSession, extID strin
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 
-// cacheMiss is implemented in Task 16.
+// cacheMiss fetches the run's logs and metadata via gh, caches the raw log to
+// disk, writes a run-summary memory entry plus one entry per failed job, and
+// finally echoes gh's raw --log output to stdout unchanged.
 func cacheMiss(ctx context.Context, d cilogsDeps, sess *mcp.ClientSession, repo string, a cilogsArgs) int {
-	_ = ctx
-	_ = d
-	_ = sess
-	_ = repo
-	_ = a
-	fmt.Fprintln(os.Stderr, "hivemind: cache miss handling not yet implemented")
-	return 1
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		fmt.Fprintf(os.Stderr, "hivemind: bad repo %q\n", repo)
+		return 2
+	}
+
+	logFlag := "--log"
+	if a.logFailed {
+		logFlag = "--log-failed"
+	}
+	logOut, err := d.gh(ctx, "run", "view", a.runID, "-R", repo, logFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hivemind: gh log fetch failed: %v\n", err)
+		return 1
+	}
+	metaOut, err := d.gh(ctx, "run", "view", a.runID, "-R", repo, "--json",
+		"workflowName,conclusion,headSha,headBranch,event,jobs")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hivemind: gh metadata fetch failed: %v\n", err)
+		return 1
+	}
+	var meta cilog.RunMeta
+	if err := json.Unmarshal(metaOut, &meta); err != nil {
+		fmt.Fprintf(os.Stderr, "hivemind: parsing gh metadata: %v\n", err)
+		return 1
+	}
+	meta.Repo, meta.RunID = repo, a.runID
+
+	cacheDir := os.Getenv("HIVEMIND_CI_LOG_DIR")
+	if cacheDir == "" {
+		cacheDir = filepath.Join(runtimeDir(), "ci-logs")
+	}
+	runLog := cilog.RunLogPath(cacheDir, owner, name, a.runID)
+	if err := os.MkdirAll(filepath.Dir(runLog), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "hivemind: %v\n", err)
+		return 1
+	}
+	if err := os.WriteFile(runLog, logOut, 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "hivemind: %v\n", err)
+		return 1
+	}
+
+	summaryTags := append(cilog.Tags(repo, a.runID, meta.WorkflowName, meta.HeadSHA, meta.StatusWord()), cilog.LogPathTag(runLog))
+	if err := writeEntry(ctx, sess, writeArgs{
+		content:    cilog.BuildRunSummary(meta),
+		externalID: cilog.RunExternalID(repo, a.runID),
+		tags:       summaryTags,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "hivemind: caching summary: %v\n", err)
+		return 1
+	}
+	for _, j := range meta.FailedJobs() {
+		body := cilog.ExtractJobFailure(string(logOut), j.Name)
+		if body == "" {
+			body = fmt.Sprintf("job %q failed (no error lines isolated; see %s)", j.Name, runLog)
+		}
+		if err := writeEntry(ctx, sess, writeArgs{
+			content:    body,
+			externalID: cilog.JobExternalID(repo, a.runID, itoa64(j.DatabaseID)),
+			tags: []string{
+				"repo:" + repo, "run_id:" + a.runID, "job:" + j.Name,
+				"status:fail", cilog.LogPathTag(runLog),
+			},
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "hivemind: caching job failure: %v\n", err)
+			return 1
+		}
+	}
+
+	if _, err := d.stdout.Write(logOut); err != nil {
+		fmt.Fprintf(os.Stderr, "hivemind: %v\n", err)
+		return 1
+	}
+	return 0
 }
+
+type writeArgs struct {
+	content    string
+	externalID string
+	tags       []string
+}
+
+func writeEntry(ctx context.Context, sess *mcp.ClientSession, w writeArgs) error {
+	res, err := sess.CallTool(ctx, &mcp.CallToolParams{
+		Name: "memory_write",
+		Arguments: map[string]any{
+			"session_id":  "hivemind-cli",
+			"content":     w.content,
+			"source":      cilog.Source,
+			"scope":       "user",
+			"source_type": "etl",
+			"external_id": w.externalID,
+			"tags":        w.tags,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if res.IsError {
+		return fmt.Errorf("memory_write error result")
+	}
+	return nil
+}
+
+func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
