@@ -60,22 +60,23 @@ jobs:
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           EXT=""
           [ "${{ matrix.goos }}" = "windows" ] && EXT=".exe"
-          go build -ldflags "-X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE" \
-            -o "hivemindd${EXT}" ./cmd/hivemindd
+          LDFLAGS="-X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE"
+          go build -ldflags "$LDFLAGS" -o "hivemindd${EXT}" ./cmd/hivemindd
+          go build -ldflags "$LDFLAGS" -o "hivemind${EXT}" ./cmd/hivemind
 
       - name: Archive (tar.gz)
         if: matrix.archive == 'tar.gz'
-        run: tar -czf "hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" hivemindd
+        run: tar -czf "hivemind_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" hivemindd hivemind
 
       - name: Archive (zip)
         if: matrix.archive == 'zip'
         shell: pwsh
-        run: Compress-Archive -Path hivemindd.exe -DestinationPath "hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
+        run: Compress-Archive -Path hivemindd.exe, hivemind.exe -DestinationPath "hivemind_${{ matrix.goos }}_${{ matrix.goarch }}.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: hivemindd_${{ matrix.goos }}_${{ matrix.goarch }}.*
+          name: hivemind_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: hivemind_${{ matrix.goos }}_${{ matrix.goarch }}.*
           if-no-files-found: error
 
   publish:
@@ -102,7 +103,7 @@ jobs:
 
       - name: Checksums
         working-directory: dist
-        run: sha256sum hivemindd_* > checksums.txt
+        run: sha256sum hivemind_* > checksums.txt
 
       - name: Create GitHub Release
         env:
@@ -126,33 +127,34 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/homebrew-causewayai.git" tap
-          cat > tap/Formula/hivemindd.rb <<EOF
-          class Hivemindd < Formula
-            desc "Local persistent memory daemon for AI harnesses (MCP over HTTP)"
+          cat > tap/Formula/hivemind.rb <<EOF
+          class Hivemind < Formula
+            desc "Local persistent memory for AI harnesses: hivemindd daemon + hivemind CLI"
             homepage "https://github.com/causewayai/hivemind"
             version "${VERSION}"
             license "UNLICENSED"
 
             on_macos do
               on_arm do
-                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_darwin_arm64.tar.gz"
+                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemind_darwin_arm64.tar.gz"
                 sha256 "${DARWIN_ARM64_SHA}"
               end
               on_intel do
-                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_darwin_amd64.tar.gz"
+                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemind_darwin_amd64.tar.gz"
                 sha256 "${DARWIN_AMD64_SHA}"
               end
             end
 
             on_linux do
               on_intel do
-                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_linux_amd64.tar.gz"
+                url "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemind_linux_amd64.tar.gz"
                 sha256 "${LINUX_AMD64_SHA}"
               end
             end
 
             def install
               bin.install "hivemindd"
+              bin.install "hivemind"
             end
 
             service do
@@ -165,14 +167,19 @@ jobs:
 
             test do
               assert_match version.to_s, shell_output("#{bin}/hivemindd --version")
+              assert_match version.to_s, shell_output("#{bin}/hivemind version")
             end
           end
           EOF
           cd tap
           git config user.name "causeway-release-bot"
           git config user.email "actions@github.com"
-          git add Formula/hivemindd.rb
-          git commit -m "hivemindd ${VERSION}"
+          # The formula was renamed hivemindd.rb -> hivemind.rb (it now ships
+          # both binaries). Drop the old file on the first release that carries
+          # this change; a no-op afterward.
+          git rm -f Formula/hivemindd.rb 2>/dev/null || true
+          git add Formula/hivemind.rb
+          git commit -m "hivemind ${VERSION}"
           git push
 
       - name: Update Scoop bucket
@@ -181,19 +188,22 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           git clone "https://x-access-token:${GH_TOKEN}@github.com/causewayai/scoop-causewayai.git" bucket
-          cat > bucket/bucket/hivemindd.json <<EOF
+          cat > bucket/bucket/hivemind.json <<EOF
           {
             "version": "${VERSION}",
-            "description": "Local persistent memory daemon for AI harnesses (MCP over HTTP)",
+            "description": "Local persistent memory for AI harnesses: hivemindd daemon + hivemind CLI",
             "homepage": "https://github.com/causewayai/hivemind",
             "license": "UNLICENSED",
             "architecture": {
               "64bit": {
-                "url": "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemindd_windows_amd64.zip",
+                "url": "https://github.com/causewayai/hivemind/releases/download/${GITHUB_REF_NAME}/hivemind_windows_amd64.zip",
                 "hash": "${WINDOWS_AMD64_SHA}"
               }
             },
-            "bin": "hivemindd.exe",
+            "bin": [
+              "hivemindd.exe",
+              "hivemind.exe"
+            ],
             "checkver": {
               "github": "https://github.com/causewayai/hivemind"
             }
@@ -202,6 +212,8 @@ jobs:
           cd bucket
           git config user.name "causeway-release-bot"
           git config user.email "actions@github.com"
-          git add bucket/hivemindd.json
-          git commit -m "hivemindd ${VERSION}"
+          # Renamed hivemindd.json -> hivemind.json (now ships both binaries).
+          git rm -f bucket/hivemindd.json 2>/dev/null || true
+          git add bucket/hivemind.json
+          git commit -m "hivemind ${VERSION}"
           git push
