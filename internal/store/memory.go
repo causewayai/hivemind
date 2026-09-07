@@ -177,6 +177,32 @@ func (s *Store) GetMemoryByExternalID(source, externalID, scope string) (*Memory
 	return s.GetMemory(id)
 }
 
+// DeleteMemory removes an entry, its tags, and its embedding row, all within
+// one transaction. Safe to call for an unknown id (no-op). Tags are deleted
+// explicitly rather than left to ON DELETE CASCADE because foreign-key
+// enforcement is not enabled on the connection pool; the embedding row lives
+// in a sqlite-vec virtual table that no foreign key could cascade to anyway.
+func (s *Store) DeleteMemory(id string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(
+		`DELETE FROM memory_vectors WHERE rowid = (SELECT rowid FROM memory_entries WHERE id = ?)`, id,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM memory_tags WHERE memory_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM memory_entries WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ListFilter narrows ListMemories to entries matching all given criteria;
 // zero-valued fields are unconstrained.
 type ListFilter struct {

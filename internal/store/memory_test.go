@@ -201,6 +201,29 @@ func TestGetMemoryByExternalID(t *testing.T) {
 	}
 }
 
+func TestDeleteMemory_RemovesEntryTagsAndVector(t *testing.T) {
+	s := openTestStore(t, 4)
+	e, err := s.CreateMemory(CreateMemoryInput{
+		Content: "x", Scope: "user", Source: "github-actions", SourceType: "etl",
+		ExternalID: "o/r#1", Tags: []string{"log_path:/tmp/a.log"},
+		Embedding: []float32{0.1, 0.1, 0.1, 0.1},
+	})
+	if err != nil {
+		t.Fatalf("CreateMemory() error = %v", err)
+	}
+	if err := s.DeleteMemory(e.ID); err != nil {
+		t.Fatalf("DeleteMemory() error = %v", err)
+	}
+	if got, _ := s.GetMemory(e.ID); got != nil {
+		t.Fatal("entry still present after DeleteMemory")
+	}
+	var tagCount int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM memory_tags WHERE memory_id = ?`, e.ID).Scan(&tagCount)
+	if tagCount != 0 {
+		t.Errorf("tags not cascaded: %d remain", tagCount)
+	}
+}
+
 func TestListMemories_FilterByExternalID(t *testing.T) {
 	s := openTestStore(t, 8)
 	mk := func(ext string) {
