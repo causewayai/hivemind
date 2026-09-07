@@ -48,6 +48,30 @@ func TestDaemonStop_NoPidFileSaysNotRunning(t *testing.T) {
 	}
 }
 
+func TestDaemonStopIsGraceful_Unix(t *testing.T) {
+	if !daemonStopIsGraceful {
+		t.Error("unix builds stop the daemon gracefully via SIGTERM; the daemon removes its own port/pid files")
+	}
+}
+
+func TestDaemonStopped_TracksPortFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HIVEMIND_DATA_DIR", filepath.Join(dir, "hivemind.db"))
+
+	if err := os.WriteFile(portFilePath(), []byte("12345"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if daemonStopped() {
+		t.Error("daemonStopped() = true while daemon.port is present")
+	}
+	if err := os.Remove(portFilePath()); err != nil {
+		t.Fatal(err)
+	}
+	if !daemonStopped() {
+		t.Error("daemonStopped() = false after daemon.port was removed")
+	}
+}
+
 func TestDaemonCmd_UnknownSubcommand(t *testing.T) {
 	if code := runDaemonCmd([]string{"frobnicate"}); code != 2 {
 		t.Errorf("unknown daemon subcommand should exit 2, got %d", code)
