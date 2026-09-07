@@ -9,6 +9,14 @@ import (
 	"github.com/causewayai/hivemind/internal/store"
 )
 
+// statMissing returns nil when path does not exist, else os.ErrExist.
+func statMissing(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	return os.ErrExist
+}
+
 func writeLog(t *testing.T, path string, size int, age time.Duration) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
