@@ -18,6 +18,7 @@ export CGO_CFLAGS := -I$(subst \,/,$(shell go list -m -f '{{.Dir}}' github.com/m
 
 build:
 	CGO_ENABLED=1 go build -o hivemindd ./cmd/hivemindd
+	CGO_ENABLED=1 go build -o hivemind ./cmd/hivemind
 
 test:
 	go test ./...

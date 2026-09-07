@@ -1,4 +1,5 @@
 /hivemindd
+/hivemind
 *.db
 *.db-wal
 *.db-shm
