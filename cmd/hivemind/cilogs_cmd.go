@@ -95,18 +95,44 @@ func runCILogsWith(ctx context.Context, d cilogsDeps, args []string) int {
 	}
 	defer func() { _ = sess.Close() }()
 
-	extID := cilog.RunExternalID(repo, a.runID)
-	hits, err := queryByExternalID(ctx, sess, extID)
+	entries, err := queryRunEntries(ctx, sess, repo, a.runID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hivemind: cache query failed: %v\n", err)
 		return 1
 	}
-	if len(hits) > 0 {
-		for _, h := range hits {
-			if _, err := fmt.Fprintln(d.stdout, h); err != nil {
-				fmt.Fprintf(os.Stderr, "hivemind: %v\n", err)
-				return 1
+	if len(entries) > 0 {
+		var summary, jobs []cachedEntry
+		for _, e := range entries {
+			if hasJobTag(e.Tags) {
+				jobs = append(jobs, e)
+			} else {
+				summary = append(summary, e)
 			}
+		}
+
+		var parts []string
+		if a.logFailed {
+			// Only the per-failed-job entries; fall back to the summary
+			// when the run recorded no isolated job failures.
+			src := jobs
+			if len(src) == 0 {
+				src = summary
+			}
+			for _, e := range src {
+				parts = append(parts, e.Content)
+			}
+		} else {
+			for _, e := range summary {
+				parts = append(parts, e.Content)
+			}
+			for _, e := range jobs {
+				parts = append(parts, e.Content)
+			}
+		}
+
+		if _, err := io.WriteString(d.stdout, strings.Join(parts, "\n\n")+"\n"); err != nil {
+			fmt.Fprintf(os.Stderr, "hivemind: %v\n", err)
+			return 1
 		}
 		return 0
 	}
@@ -114,15 +140,27 @@ func runCILogsWith(ctx context.Context, d cilogsDeps, args []string) int {
 	return cacheMiss(ctx, d, sess, repo, a)
 }
 
-// queryByExternalID runs a structured-only memory_query and returns entry contents.
-func queryByExternalID(ctx context.Context, sess *mcp.ClientSession, extID string) ([]string, error) {
+// cachedEntry is the subset of a memory_query result the CLI needs. The daemon
+// serializes store.MemoryEntry with capitalized keys; encoding/json matches
+// these lowercase tags case-insensitively.
+type cachedEntry struct {
+	Content string   `json:"content"`
+	Tags    []string `json:"tags"`
+}
+
+// queryRunEntries runs a structured-only memory_query keyed on the shared
+// run_id: tag and returns every cached entry for repo/runID — the run summary
+// and one per failed job. The daemon's tag filter is ANY-of, so results are
+// re-filtered client-side to entries carrying BOTH repo:<repo> and
+// run_id:<runID>.
+func queryRunEntries(ctx context.Context, sess *mcp.ClientSession, repo, runID string) ([]cachedEntry, error) {
 	res, err := sess.CallTool(ctx, &mcp.CallToolParams{
 		Name: "memory_query",
 		Arguments: map[string]any{
-			"session_id":  "hivemind-cli",
-			"external_id": extID,
-			"source":      cilog.Source,
-			"top_k":       50,
+			"session_id": "hivemind-cli",
+			"tags":       []string{"run_id:" + runID},
+			"source":     cilog.Source,
+			"top_k":      200,
 		},
 	})
 	if err != nil {
@@ -138,18 +176,39 @@ func queryByExternalID(ctx context.Context, sess *mcp.ClientSession, extID strin
 		}
 	}
 	var out struct {
-		Results []struct {
-			Content string `json:"content"`
-		} `json:"results"`
+		Results []cachedEntry `json:"results"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err
 	}
-	contents := make([]string, 0, len(out.Results))
-	for _, r := range out.Results {
-		contents = append(contents, r.Content)
+	wantRepo, wantRun := "repo:"+repo, "run_id:"+runID
+	matched := make([]cachedEntry, 0, len(out.Results))
+	for _, e := range out.Results {
+		if containsTag(e.Tags, wantRepo) && containsTag(e.Tags, wantRun) {
+			matched = append(matched, e)
+		}
 	}
-	return contents, nil
+	return matched, nil
+}
+
+func containsTag(tags []string, want string) bool {
+	for _, t := range tags {
+		if t == want {
+			return true
+		}
+	}
+	return false
+}
+
+// hasJobTag reports whether tags contains any "job:<name>" tag, marking the
+// entry as a per-failed-job entry rather than the run summary.
+func hasJobTag(tags []string) bool {
+	for _, t := range tags {
+		if strings.HasPrefix(t, "job:") {
+			return true
+		}
+	}
+	return false
 }
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
