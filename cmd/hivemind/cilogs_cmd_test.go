@@ -27,12 +27,21 @@ func TestCILogs_CacheHitPrintsFromCacheNoGH(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	// Seed a run-summary entry as the daemon would have.
+	// Seed a run-summary entry and a per-failed-job entry, as cacheMiss would.
 	if _, err := s.CreateMemory(store.CreateMemoryInput{
 		Content: "RUN 42 conclusion=failure workflow=CI", Scope: "user",
 		Source: cilog.Source, SourceType: "etl",
 		ExternalID: cilog.RunExternalID("causewayai/hivemind", "42"),
 		Tags:       cilog.Tags("causewayai/hivemind", "42", "CI", "abc123", "fail"),
+		Embedding:  make([]float32, 768),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMemory(store.CreateMemoryInput{
+		Content: "##[error]boom window", Scope: "user",
+		Source: cilog.Source, SourceType: "etl",
+		ExternalID: cilog.JobExternalID("causewayai/hivemind", "42", "7"),
+		Tags:       []string{"repo:causewayai/hivemind", "run_id:42", "job:build", "status:fail"},
 		Embedding:  make([]float32, 768),
 	}); err != nil {
 		t.Fatal(err)
@@ -46,21 +55,38 @@ func TestCILogs_CacheHitPrintsFromCacheNoGH(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var out bytes.Buffer
-	ghCalled := false
-	code := runCILogsWith(context.Background(), cilogsDeps{
-		stdout: &out,
-		gh:     func(context.Context, ...string) ([]byte, error) { ghCalled = true; return nil, nil },
-	}, []string{"run", "view", "42", "-R", "causewayai/hivemind", "--log"})
+	noGH := func(context.Context, ...string) ([]byte, error) {
+		t.Helper()
+		t.Fatal("gh must not be called on a cache hit")
+		return nil, nil
+	}
 
+	// --log: both the summary and every per-failed-job entry.
+	var out bytes.Buffer
+	code := runCILogsWith(context.Background(), cilogsDeps{stdout: &out, gh: noGH},
+		[]string{"run", "view", "42", "-R", "causewayai/hivemind", "--log"})
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0; output:\n%s", code, out.String())
 	}
-	if ghCalled {
-		t.Fatal("gh must not be called on a cache hit")
-	}
 	if !bytes.Contains(out.Bytes(), []byte("RUN 42 conclusion=failure")) {
-		t.Fatalf("cache-hit output missing summary; got:\n%s", out.String())
+		t.Fatalf("--log output missing summary; got:\n%s", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte("##[error]boom window")) {
+		t.Fatalf("--log output missing job-failure entry; got:\n%s", out.String())
+	}
+
+	// --log-failed: only the per-failed-job entries.
+	var outFailed bytes.Buffer
+	code = runCILogsWith(context.Background(), cilogsDeps{stdout: &outFailed, gh: noGH},
+		[]string{"run", "view", "42", "-R", "causewayai/hivemind", "--log-failed"})
+	if code != 0 {
+		t.Fatalf("--log-failed exit = %d, want 0; output:\n%s", code, outFailed.String())
+	}
+	if !bytes.Contains(outFailed.Bytes(), []byte("##[error]boom window")) {
+		t.Fatalf("--log-failed output missing job-failure entry; got:\n%s", outFailed.String())
+	}
+	if bytes.Contains(outFailed.Bytes(), []byte("conclusion=failure")) {
+		t.Fatalf("--log-failed should not print the run summary; got:\n%s", outFailed.String())
 	}
 }
 
