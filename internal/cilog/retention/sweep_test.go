@@ -1,4 +1,4 @@
-package cilog
+package retention
 
 import (
 	"os"
@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/causewayai/hivemind/internal/cilog"
 	"github.com/causewayai/hivemind/internal/store"
 )
 
@@ -34,8 +35,8 @@ func writeLog(t *testing.T, path string, size int, age time.Duration) {
 func seedEntry(t *testing.T, s *store.Store, extID, logPath string) {
 	t.Helper()
 	if _, err := s.CreateMemory(store.CreateMemoryInput{
-		Content: "x", Scope: "user", Source: Source, SourceType: "etl",
-		ExternalID: extID, Tags: []string{LogPathTag(logPath)},
+		Content: "x", Scope: "user", Source: cilog.Source, SourceType: "etl",
+		ExternalID: extID, Tags: []string{cilog.LogPathTag(logPath)},
 		Embedding: make([]float32, 8),
 	}); err != nil {
 		t.Fatalf("seed error = %v", err)
@@ -70,10 +71,10 @@ func TestSweep_DeletesByAgeAndCascadesEntries(t *testing.T) {
 	if _, err := os.Stat(fresh); err != nil {
 		t.Error("fresh log wrongly deleted")
 	}
-	if e, _ := s.GetMemoryByExternalID(Source, "o/r#1", "user"); e != nil {
+	if e, _ := s.GetMemoryByExternalID(cilog.Source, "o/r#1", "user"); e != nil {
 		t.Error("entry for old log not cascaded")
 	}
-	if e, _ := s.GetMemoryByExternalID(Source, "o/r#2", "user"); e == nil {
+	if e, _ := s.GetMemoryByExternalID(cilog.Source, "o/r#2", "user"); e == nil {
 		t.Error("entry for fresh log wrongly deleted")
 	}
 }
@@ -139,10 +140,10 @@ func TestSweep_NonPositiveLimitsAreNoOp(t *testing.T) {
 	if _, err := os.Stat(b); err != nil {
 		t.Error("log b wrongly deleted under non-positive limits")
 	}
-	if e, _ := s.GetMemoryByExternalID(Source, "o/r#1", "user"); e == nil {
+	if e, _ := s.GetMemoryByExternalID(cilog.Source, "o/r#1", "user"); e == nil {
 		t.Error("entry for log a wrongly deleted under non-positive limits")
 	}
-	if e, _ := s.GetMemoryByExternalID(Source, "o/r#2", "user"); e == nil {
+	if e, _ := s.GetMemoryByExternalID(cilog.Source, "o/r#2", "user"); e == nil {
 		t.Error("entry for log b wrongly deleted under non-positive limits")
 	}
 }

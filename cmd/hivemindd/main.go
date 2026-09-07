@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/causewayai/hivemind/internal/cilog"
+	"github.com/causewayai/hivemind/internal/cilog/retention"
 	"github.com/causewayai/hivemind/internal/config"
 	"github.com/causewayai/hivemind/internal/embedding"
 	"github.com/causewayai/hivemind/internal/mcpserver"
@@ -102,7 +102,7 @@ func serve(ctx context.Context, cfg *config.Config) error {
 	}()
 
 	if cfg.CILogCleanupEnabled {
-		go cilog.RunTicker(ctx, s, cilog.TickerConfig{
+		go retention.RunTicker(ctx, s, retention.TickerConfig{
 			Dir: cfg.CILogDir, MaxAge: cfg.CILogMaxAge, MaxSize: cfg.CILogMaxSize, Interval: time.Hour,
 		})
 	}

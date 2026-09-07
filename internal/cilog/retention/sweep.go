@@ -1,4 +1,9 @@
-package cilog
+// Package retention is the store-dependent CI-log cache retention sweep and
+// hourly ticker. It lives apart from internal/cilog — which stays pure
+// (stdlib only) — so the hivemind client CLI can import the CI-log vocabulary
+// without transitively linking internal/store and its sqlite-vec cgo
+// dependency. Only hivemindd imports this package.
+package retention
 
 import (
 	"io/fs"
@@ -7,6 +12,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/causewayai/hivemind/internal/cilog"
 	"github.com/causewayai/hivemind/internal/store"
 )
 
@@ -96,7 +102,7 @@ func Sweep(s *store.Store, dir string, maxAge time.Duration, maxSize int64, now 
 }
 
 func deleteLog(s *store.Store, f logFile, res *SweepResult) error {
-	entries, err := s.ListMemories(store.ListFilter{Tags: []string{LogPathTag(f.path)}})
+	entries, err := s.ListMemories(store.ListFilter{Tags: []string{cilog.LogPathTag(f.path)}})
 	if err != nil {
 		return err
 	}
