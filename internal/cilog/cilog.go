@@ -1,7 +1,9 @@
 // Package cilog holds the GitHub-Actions CI-log cache convention: the
-// external_id and tag vocabulary shared by the hivemind CLI and the daemon's
-// retention sweep, plus the sweep itself. hivemindd's core never imports this
-// as a "GitHub" concept — it only sees generic memory_write/memory_query.
+// external_id and tag vocabulary plus repo/URL parsing shared by the hivemind
+// CLI and the daemon's retention sweep (internal/cilog/retention). It is pure
+// (stdlib only) so the client CLI can import it without linking the store's
+// cgo. hivemindd's core never imports this as a "GitHub" concept — it only
+// sees generic memory_write/memory_query.
 package cilog
 
 import (
