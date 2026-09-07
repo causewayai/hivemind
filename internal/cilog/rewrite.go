@@ -26,6 +26,14 @@ func RewriteGHLogCommand(cmd string) (string, bool) {
 	if len(fields) < 3 || fields[0] != "gh" || fields[1] != "run" || fields[2] != "view" {
 		return "", false
 	}
+	// Only the id-first form (`gh run view <id> …`) rewrites cleanly.
+	// parseCILogsArgs takes args[2] as the run id verbatim, so a flag-first
+	// command (`gh run view --log 42`) would rewrite to one the CLI
+	// mis-parses (run id "--log"). Refuse it: the hook emits nothing and the
+	// original gh command runs unchanged.
+	if len(fields) < 4 || strings.HasPrefix(fields[3], "-") {
+		return "", false
+	}
 	hasLog := false
 	for _, f := range fields[3:] {
 		if f == "--log" || f == "--log-failed" {
