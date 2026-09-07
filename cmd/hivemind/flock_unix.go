@@ -9,6 +9,8 @@ import (
 
 func daemonExeName() string { return "hivemindd" }
 
+func signalTerm(p *os.Process) error { return p.Signal(syscall.SIGTERM) }
+
 func detachAttrs() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setsid: true} }
 
 // acquireLock takes an exclusive advisory lock on path (creating it), returning

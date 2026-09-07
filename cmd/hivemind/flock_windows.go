@@ -10,6 +10,8 @@ import (
 
 func daemonExeName() string { return "hivemindd.exe" }
 
+func signalTerm(p *os.Process) error { return p.Kill() } // no SIGTERM on Windows
+
 func detachAttrs() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{CreationFlags: 0x00000200} // CREATE_NEW_PROCESS_GROUP
 }
