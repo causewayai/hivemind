@@ -180,11 +180,12 @@ func (s *Store) GetMemoryByExternalID(source, externalID, scope string) (*Memory
 // ListFilter narrows ListMemories to entries matching all given criteria;
 // zero-valued fields are unconstrained.
 type ListFilter struct {
-	Scope     string // "session" or "user"; empty means both
-	SessionID string // required when filtering scope == "session"
-	Tags      []string
-	Source    string
-	Limit     int
+	Scope      string // "session" or "user"; empty means both
+	SessionID  string // required when filtering scope == "session"
+	Tags       []string
+	Source     string
+	ExternalID string // exact match on the ETL external key
+	Limit      int
 }
 
 // ListMemories returns entries matching f, most recently created first.
@@ -213,6 +214,10 @@ func (s *Store) ListMemories(f ListFilter) ([]*MemoryEntry, error) {
 	if f.Source != "" {
 		where = append(where, "e.source = ?")
 		args = append(args, f.Source)
+	}
+	if f.ExternalID != "" {
+		where = append(where, "e.external_id = ?")
+		args = append(args, f.ExternalID)
 	}
 
 	if len(where) > 0 {
