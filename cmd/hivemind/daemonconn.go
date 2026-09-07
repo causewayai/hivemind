@@ -60,3 +60,33 @@ func daemonRunning(ctx context.Context) bool {
 	_ = sess.Close()
 	return true
 }
+
+// serverVersion returns the daemon's advertised implementation version, or ""
+// if the SDK does not surface it. The value comes from the cached initialize
+// result, so it is safe to read after the session is closed.
+func serverVersion(sess *mcp.ClientSession) string {
+	res := sess.InitializeResult()
+	if res == nil || res.ServerInfo == nil {
+		return ""
+	}
+	return res.ServerInfo.Version
+}
+
+// connectChecked returns a session to a running (auto-started if needed)
+// daemon, restarting it once if it is older than this CLI.
+func connectChecked(ctx context.Context) (*mcp.ClientSession, error) {
+	sess, err := ensureDaemon(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dv := serverVersion(sess)
+	if daemonOlderThanCLI(version, dv) {
+		_ = sess.Close()
+		fmt.Fprintf(os.Stderr, "hivemind: running hivemindd %s is older than CLI %s; restarting it\n", dv, version)
+		if code := stopDaemon(); code != 0 {
+			return nil, fmt.Errorf("could not restart the older daemon automatically; stop it yourself (e.g. `brew services restart hivemindd`) and retry")
+		}
+		return ensureDaemon(ctx)
+	}
+	return sess, nil
+}
