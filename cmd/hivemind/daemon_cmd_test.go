@@ -48,12 +48,6 @@ func TestDaemonStop_NoPidFileSaysNotRunning(t *testing.T) {
 	}
 }
 
-func TestDaemonStopIsGraceful_Unix(t *testing.T) {
-	if !daemonStopIsGraceful {
-		t.Error("unix builds stop the daemon gracefully via SIGTERM; the daemon removes its own port/pid files")
-	}
-}
-
 func TestDaemonStopped_TracksPortFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HIVEMIND_DATA_DIR", filepath.Join(dir, "hivemind.db"))

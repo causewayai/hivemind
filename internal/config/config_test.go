@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -46,24 +47,26 @@ func TestLoad_Overrides(t *testing.T) {
 }
 
 func TestConfig_RuntimeAndFilePaths(t *testing.T) {
-	t.Setenv("HIVEMIND_DATA_DIR", "/tmp/hm/hivemind.db")
+	runtimeDir := filepath.Join(t.TempDir(), "hm")
+	t.Setenv("HIVEMIND_DATA_DIR", filepath.Join(runtimeDir, "hivemind.db"))
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.RuntimeDir() != "/tmp/hm" {
-		t.Errorf("RuntimeDir() = %q, want /tmp/hm", cfg.RuntimeDir())
+	if cfg.RuntimeDir() != runtimeDir {
+		t.Errorf("RuntimeDir() = %q, want %q", cfg.RuntimeDir(), runtimeDir)
 	}
-	if cfg.PortFilePath() != "/tmp/hm/daemon.port" {
-		t.Errorf("PortFilePath() = %q", cfg.PortFilePath())
+	if want := filepath.Join(runtimeDir, "daemon.port"); cfg.PortFilePath() != want {
+		t.Errorf("PortFilePath() = %q, want %q", cfg.PortFilePath(), want)
 	}
-	if cfg.PIDFilePath() != "/tmp/hm/daemon.pid" {
-		t.Errorf("PIDFilePath() = %q", cfg.PIDFilePath())
+	if want := filepath.Join(runtimeDir, "daemon.pid"); cfg.PIDFilePath() != want {
+		t.Errorf("PIDFilePath() = %q, want %q", cfg.PIDFilePath(), want)
 	}
 }
 
 func TestConfig_CILogDefaults(t *testing.T) {
-	t.Setenv("HIVEMIND_DATA_DIR", "/tmp/hm/hivemind.db")
+	runtimeDir := filepath.Join(t.TempDir(), "hm")
+	t.Setenv("HIVEMIND_DATA_DIR", filepath.Join(runtimeDir, "hivemind.db"))
 	for _, k := range []string{"HIVEMIND_CI_LOG_DIR", "HIVEMIND_CI_LOG_MAX_AGE", "HIVEMIND_CI_LOG_MAX_SIZE", "HIVEMIND_CI_LOG_CLEANUP"} {
 		t.Setenv(k, "")
 	}
@@ -71,8 +74,8 @@ func TestConfig_CILogDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.CILogDir != "/tmp/hm/ci-logs" {
-		t.Errorf("CILogDir = %q", cfg.CILogDir)
+	if want := filepath.Join(runtimeDir, "ci-logs"); cfg.CILogDir != want {
+		t.Errorf("CILogDir = %q, want %q", cfg.CILogDir, want)
 	}
 	if cfg.CILogMaxAge != 30*24*time.Hour {
 		t.Errorf("CILogMaxAge = %v, want 720h", cfg.CILogMaxAge)
