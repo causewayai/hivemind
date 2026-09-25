@@ -46,3 +46,7 @@ jobs:
       - name: make check
         run: make check
         shell: bash
+
+      - name: Build binaries
+        run: make build
+        shell: bash

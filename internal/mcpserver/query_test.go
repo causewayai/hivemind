@@ -72,3 +72,69 @@ func TestMemoryQuery_SessionIsolation(t *testing.T) {
 		t.Errorf("expected to see user-scope entry")
 	}
 }
+
+// countingProvider fails the test if Embed is ever called.
+type countingProvider struct{ t *testing.T }
+
+func (p countingProvider) Embed(context.Context, string) ([]float32, error) {
+	p.t.Fatalf("embedder must not be called on a structured-only query")
+	return nil, nil
+}
+
+func TestMemoryQuery_StructuredOnlyByExternalID(t *testing.T) {
+	s := openMCPTestStore(t)
+	writer := New(s, embedding.NewHashProvider(8))
+	if _, err := writer.handleMemoryWrite(context.Background(), MemoryWriteInput{
+		Content: "cached run 1", Source: "github-actions",
+		Scope: "user", SourceType: "etl", ExternalID: "o/r#1",
+	}); err != nil {
+		t.Fatalf("seed write error = %v", err)
+	}
+
+	reader := New(s, countingProvider{t})
+	out, err := reader.handleMemoryQuery(context.Background(), MemoryQueryInput{
+		SessionID: "sess-1", ExternalID: "o/r#1", Source: "github-actions", TopK: 10,
+	})
+	if err != nil {
+		t.Fatalf("handleMemoryQuery() error = %v", err)
+	}
+	if len(out.Results) != 1 || out.Results[0].Content != "cached run 1" {
+		t.Fatalf("Results = %+v, want the one cached entry", out.Results)
+	}
+}
+
+func TestMemoryQuery_StructuredOnlyRespectsSessionIsolation(t *testing.T) {
+	s := openMCPTestStore(t)
+	w := New(s, embedding.NewHashProvider(8))
+	if _, err := w.handleMemoryWrite(context.Background(), MemoryWriteInput{
+		SessionID: "sess-B", Content: "B private", Source: "hb", Tags: []string{"k:v"},
+	}); err != nil {
+		t.Fatalf("write error = %v", err)
+	}
+	r := New(s, countingProvider{t})
+	out, err := r.handleMemoryQuery(context.Background(), MemoryQueryInput{
+		SessionID: "sess-A", Tags: []string{"k:v"}, TopK: 10,
+	})
+	if err != nil {
+		t.Fatalf("handleMemoryQuery() error = %v", err)
+	}
+	for _, e := range out.Results {
+		if e.Content == "B private" {
+			t.Fatal("structured query leaked another session's session-scope entry")
+		}
+	}
+}
+
+func TestMemoryQuery_StructuredMissIsEmptyNotError(t *testing.T) {
+	s := openMCPTestStore(t)
+	r := New(s, countingProvider{t})
+	out, err := r.handleMemoryQuery(context.Background(), MemoryQueryInput{
+		SessionID: "sess-1", ExternalID: "o/r#nope", TopK: 10,
+	})
+	if err != nil {
+		t.Fatalf("miss must not error, got %v", err)
+	}
+	if len(out.Results) != 0 {
+		t.Fatalf("expected no results, got %+v", out.Results)
+	}
+}
